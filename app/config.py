@@ -55,13 +55,13 @@ class Settings:
             return
         self.accent_color = data.get("accent_color", self.accent_color)
         self.save_folder = data.get("save_folder", self.save_folder)
-        self.apperance_mode = data.get("apperance_mode", self.apperance_mode)
+        self.appearance_mode = data.get("appearance_mode", self.appearance_mode)
 
     def save(self) -> None:
         self.write_json(SETTINGS_FILE, {
             "accent_color": self.accent_color,
             "save_folder": self.save_folder,
-            "apperance_mode": self.apperance_mode,
+            "appearance_mode": self.appearance_mode,
         })
 
     @staticmethod
