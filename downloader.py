@@ -209,4 +209,4 @@ class PreviewStreamWorker(QThread):
             )
             self.finished.emit(proc.stdout.strip())
         except Exception:
-            self.finished.emit(""
+            self.finished.emit("")
