@@ -46,7 +46,7 @@ class Settings:
     def __init__(self) -> None:
         self.accent_color: str = DEFUALT_ACCENT_COLOR
         self.save_folder: str = defualt_music_folder()
-        self.apperance_mode: str = "System"  # "Light", "Dark", "System"
+        self.appearance_mode: str = "System"  # "Light", "Dark", "System"
         self._load()
 
     def _load(self) -> None:
@@ -92,7 +92,7 @@ class History:
     MAX_ITEMS = 100
 
     def __init__(self) -> None:
-        self.item: list[dict[str, str]] = self._load()
+        self.items: list[dict[str, str]] = self._load()
 
     def _load(self) -> list[dict[str, str]]:
         if not os.path.exists(HISTORY_FILE):
@@ -115,12 +115,16 @@ class History:
         self.items = self.items[: self.MAX_ITEMS]
         self.save()
 
+    def clear(self) -> None:
+        self.items.clear()
+        self.save()
+
     
-    def missing_dependencies() -> list[str]:
-        """Возвращает список отсутвующих внешних утилит (yt-dlp / ffmpeg)."""
-        missing = []
-        if not os.path.exists(YTDLP_PATH):
-            missing.append("yt-dlp.exe")
-        if not os.path.exists(FFMPEG_PATH):
-            missing.append("ffmpeg.exe")
-        return missing
+def missing_dependencies() -> list[str]:
+    """Возвращает список отсутвующих внешних утилит (yt-dlp / ffmpeg)."""
+    missing = []
+    if not os.path.exists(YTDLP_PATH):
+        missing.append("yt-dlp.exe")
+    if not os.path.exists(FFMPEG_PATH):
+        missing.append("ffmpeg.exe")
+    return missing
