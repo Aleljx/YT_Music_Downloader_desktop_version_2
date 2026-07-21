@@ -1,6 +1,6 @@
 """
 QThread-воркеры для взаимодействия с yt-dlp / ffmpeg.
- 
+
 Каждый воркер выполняет одну операцию в фоновом потоке и сообщает
 результат через сигналы — никакого прямого обращения к виджетам
 из фонового потока (в отличие от старого `self.after(0, lambda: ...)`
@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -18,33 +19,34 @@ from app.config import BASE_DIR, YTDLP_PATH
 
 
 def _startupinfo():
-    """Прячет консольное окно yt-dlp на Windows."""
+    """Прячет консольное окно yt-dlp на Windows. На других ОС не нужно."""
     if os.name == "nt":
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         return si
     return None
 
+
 def _subprocess_env() -> dict:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     return env
 
-#-------------------------------------------#
-#    Получение метаданных трека по ссылке   #
-#-------------------------------------------#
 
+# ─────────────────────────────────────────────
+#  Получение метаданных трека по ссылке
+# ─────────────────────────────────────────────
 class MetadataWorker(QThread):
     """Запрашивает title/artist/duration/обложку по ссылке через yt-dlp --dump-json."""
 
-    finished = pyqtSignal(dict)
+    finished = pyqtSignal(dict)   # {title, artist, duration, thumb_bytes, url}
     failed = pyqtSignal(str)
 
-    def __init__(self, url: str, parent=None):
+    def __init__(self, url: str, parent=None) -> None:
         super().__init__(parent)
         self.url = url
 
-    def run(self):
+    def run(self) -> None:
         try:
             result = subprocess.run(
                 [YTDLP_PATH, "--dump-json", "--no-playlist", self.url],
@@ -85,15 +87,15 @@ class MetadataWorker(QThread):
         except Exception as e:
             self.failed.emit(str(e)[:80])
 
-#------------------------#
-#    Скачивание трека    #
-#------------------------#
 
+# ─────────────────────────────────────────────
+#  Скачивание трека
+# ─────────────────────────────────────────────
 class DownloadWorker(QThread):
     """Скачивает и конвертирует трек в mp3, сообщая прогресс по ходу дела."""
 
     progress = pyqtSignal(float, str)  # доля 0..1, доп. инфо ("3.1 MB/s")
-    finished = pyqtSignal(bool)  # True — успех
+    finished = pyqtSignal(bool)        # True — успех
 
     def __init__(self, url: str, save_folder: str, parent=None) -> None:
         super().__init__(parent)
@@ -134,41 +136,58 @@ class DownloadWorker(QThread):
         except Exception:
             self.finished.emit(False)
 
-#---------------------------------------------#
-#    Поиск треков - YouTube и YouTube Music   #
-#---------------------------------------------#
-#search_prefix -> (source_id, шаблон ссылки на watch-страницу)
 
+# ─────────────────────────────────────────────
+#  Поиск треков — YouTube и YouTube Music
+# ─────────────────────────────────────────────
+# search_prefix -> (source_id, шаблон ссылки на watch-страницу)
 _SEARCH_SOURCES = {
     "ytsearch5:": ("youtube", "https://www.youtube.com/watch?v={id}"),
-    "ytmsearch5:": ("youtube_music", "https://music.youtube.com/watch?v={id}"), 
+    "ytmsearch5:": ("youtube_music", "https://music.youtube.com/watch?v={id}"),
 }
+
 
 class SearchWorker(QThread):
     """
     Ищет до 5 треков по текстовому запросу — сразу на обычном YouTube
     и на YouTube Music — и возвращает объединённый список.
+
+    Оба запроса идут параллельно (а не один за другим) и с таймаутом —
+    раньше без таймаута сетевой затык внутри yt-dlp мог "подвесить" поиск
+    навсегда, а UI продолжал показывать "Ищем...".
     """
 
-    finished = pyqtSignal(list) #[{title, url, source}, ...]
+    finished = pyqtSignal(list)  # [{title, url, source}, ...]
+    failed = pyqtSignal(str)
     # source: "youtube" | "youtube_music" — по этому полю UI выбирает иконку
+
+    SEARCH_TIMEOUT_SEC = 15
 
     def __init__(self, query: str, parent=None) -> None:
         super().__init__(parent)
         self.query = query
 
     def run(self) -> None:
-        results = []
-        for prefix, (source_id, url_template) in _SEARCH_SOURCES.items():
-            results.extend(self._search_one(prefix, source_id, url_template))
-        self.finished.emit(results)
+        try:
+            with ThreadPoolExecutor(max_workers=len(_SEARCH_SOURCES)) as pool:
+                futures = [
+                    pool.submit(self._search_one, prefix, source_id, url_template)
+                    for prefix, (source_id, url_template) in _SEARCH_SOURCES.items()
+                ]
+                results = []
+                for future in futures:
+                    results.extend(future.result())
+            self.finished.emit(results)
+        except Exception as e:
+            self.failed.emit(str(e)[:120])
+            self.finished.emit([])
 
-    def _search_one(self, prefix: str, source: str, url_template: str) -> list[dict]:
+    def _search_one(self, prefix: str, source_id: str, url_template: str) -> list[dict]:
         try:
             command = [YTDLP_PATH, prefix + self.query, "--dump-json", "--flat-playlist"]
             proc = subprocess.run(
                 command, capture_output=True, encoding="utf-8", errors="replace",
-                startupinfo=_startupinfo(),
+                startupinfo=_startupinfo(), timeout=self.SEARCH_TIMEOUT_SEC,
             )
             items = []
             for line in proc.stdout.splitlines():
@@ -181,16 +200,18 @@ class SearchWorker(QThread):
                 items.append({
                     "title": data.get("title", "Неизвестно"),
                     "url": url_template.format(id=video_id),
-                    "source": source,
+                    "source": source_id,
                 })
             return items
+        except subprocess.TimeoutExpired:
+            return []
         except Exception:
             return []
-        
-#------------------------------------------------------#
-#    Аудио-превью — получение прямой ссылки на поток   #
-#------------------------------------------------------#
 
+
+# ─────────────────────────────────────────────
+#  Аудио-превью — получение прямой ссылки на поток
+# ─────────────────────────────────────────────
 class PreviewStreamWorker(QThread):
     """Резолвит прямую ссылку на аудиопоток для предпрослушивания."""
 
@@ -205,7 +226,7 @@ class PreviewStreamWorker(QThread):
             cmd = [YTDLP_PATH, "-g", "-f", "ba", self.url]
             proc = subprocess.run(
                 cmd, capture_output=True, encoding="utf-8", errors="replace",
-                startupinfo=_startupinfo(),
+                startupinfo=_startupinfo(), timeout=20,
             )
             self.finished.emit(proc.stdout.strip())
         except Exception:
