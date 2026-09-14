@@ -475,10 +475,12 @@ class MainWindow(QMainWindow):
         self.progress_label.setText("Подготовка...")
         self._set_status(f"Скачиваем: {title or url}")
 
-        self._download_worker = DownloadWorker(url, self.settings.save_folder)
+        cached = self._metadata_cache.get(url)
+        thumb_bytes = cached.get("thumb_bytes") if cached else None
+        self._download_worker = DownloadWorker(url, self.settings.save_folder, thumb_bytes=thumb_bytes)
         self._download_worker.progress.connect(self._on_download_progress)
         self._download_worker.finished.connect(
-            lambda ok: self._on_download_finished(ok, url, title, from_queue)
+            lambda ok, cover_ok: self._on_download_finished(ok, cover_ok, url, title, from_queue)
         )
         self._download_worker.start()
 
@@ -486,14 +488,20 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(int(fraction * 100))
         self.progress_label.setText(f"{int(fraction * 100)}% · {info}" if info else f"{int(fraction * 100)}%")
 
-    def _on_download_finished(self, ok: bool, url: str, title: str | None, from_queue: bool) -> None:
+    def _on_download_finished(
+        self, ok: bool, cover_embedded: bool, url: str, title: str | None, from_queue: bool
+    ) -> None:
         self.current_download_url = None
         self.download_now_btn.setEnabled(True)
         self.progress_label.setText("Готово" if ok else "Ошибка скачивания")
-        self._set_status(
-            f"Готово: «{title or url}» сохранён" if ok
-            else f"Не удалось скачать «{title or url}»"
-        )
+
+        if ok:
+            status = f"Готово: «{title or url}» сохранён"
+            if not cover_embedded:
+                status += " (без обложки — подробности в консоли)"
+            self._set_status(status)
+        else:
+            self._set_status(f"Не удалось скачать «{title or url}»")
 
         if ok:
             entry_title = title or url
