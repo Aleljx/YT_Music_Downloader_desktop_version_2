@@ -45,6 +45,7 @@ class MetadataWorker(QThread):
 
     finished = pyqtSignal(dict)   # {title, artist, duration, thumb_bytes, url}
     failed = pyqtSignal(str)
+    log_line = pyqtSignal(str)    # для debug-панели — сырой вывод yt-dlp
 
     def __init__(self, url: str, parent=None) -> None:
         super().__init__(parent)
@@ -52,11 +53,16 @@ class MetadataWorker(QThread):
 
     def run(self) -> None:
         try:
+            command = [YTDLP_PATH, "--dump-json", "--no-playlist", self.url]
+            self.log_line.emit("$ " + " ".join(command))
             result = subprocess.run(
-                [YTDLP_PATH, "--dump-json", "--no-playlist", self.url],
+                command,
                 capture_output=True, encoding="utf-8", errors="replace",
                 timeout=20, startupinfo=_startupinfo(),
             )
+            for ln in (result.stderr or "").splitlines():
+                self.log_line.emit(ln)
+
             data = json.loads(result.stdout)
 
             title = data.get("title", "Неизвестно")
@@ -94,6 +100,7 @@ class MetadataWorker(QThread):
                 "url": self.url,
             })
         except Exception as e:
+            self.log_line.emit(f"[metadata] ОШИБКА: {e}")
             self.failed.emit(str(e)[:80])
 
 
@@ -112,6 +119,7 @@ class DownloadWorker(QThread):
 
     progress = pyqtSignal(float, str)  # доля 0..1, доп. инфо ("3.1 MB/s")
     finished = pyqtSignal(bool, bool)  # (успех скачивания, обложка встроена)
+    log_line = pyqtSignal(str)         # для debug-панели — сырой построчный вывод yt-dlp
 
     def __init__(self, url: str, save_folder: str, thumb_bytes: bytes | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -149,6 +157,7 @@ class DownloadWorker(QThread):
             self.url,
         ]
         try:
+            self.log_line.emit("$ " + " ".join(command))
             proc = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 encoding="utf-8", errors="replace",
@@ -156,6 +165,8 @@ class DownloadWorker(QThread):
             )
             for line in proc.stdout:
                 line = line.strip()
+                if line:
+                    self.log_line.emit(line)
                 if "[download]" in line and "%" in line:
                     try:
                         pct = float(line.split("%")[0].split()[-1]) / 100.0
@@ -166,22 +177,26 @@ class DownloadWorker(QThread):
             proc.wait()
             self.progress.emit(1.0, "")
             success = proc.returncode == 0
+            self.log_line.emit(f"[итог скачивания] returncode={proc.returncode}")
 
             cover_embedded = False
             if success and self.thumb_bytes:
                 mp3_path = self._read_output_filepath(filepath_tmp)
                 if mp3_path and os.path.isfile(mp3_path):
                     cover_embedded = _embed_cover(mp3_path, self.thumb_bytes)
-                else:
-                    print(
-                        f"[downloader] Не удалось определить путь к скачанному файлу "
-                        f"(mp3_path={mp3_path!r}) — обложка не встроена.",
-                        file=sys.stderr,
+                    self.log_line.emit(
+                        f"[обложка] встроена в '{mp3_path}'" if cover_embedded
+                        else f"[обложка] НЕ встроена (см. ошибку выше) — путь: '{mp3_path}'"
                     )
+                else:
+                    msg = f"Не удалось определить путь к скачанному файлу (mp3_path={mp3_path!r}) — обложка не встроена."
+                    print(f"[downloader] {msg}", file=sys.stderr)
+                    self.log_line.emit(f"[обложка] {msg}")
 
             self.finished.emit(success, cover_embedded)
-        except Exception:
+        except Exception as e:
             traceback.print_exc(file=sys.stderr)
+            self.log_line.emit(f"[downloader] ИСКЛЮЧЕНИЕ: {e}")
             self.finished.emit(False, False)
         finally:
             try:
@@ -255,6 +270,7 @@ class SearchWorker(QThread):
 
     finished = pyqtSignal(list)  # [{title, url, source}, ...]
     failed = pyqtSignal(str)
+    log_line = pyqtSignal(str)   # для debug-панели
     # source: "youtube" | "youtube_music" — по этому полю UI выбирает иконку
 
     SEARCH_TIMEOUT_SEC = 15
@@ -275,16 +291,20 @@ class SearchWorker(QThread):
                     results.extend(future.result())
             self.finished.emit(results)
         except Exception as e:
+            self.log_line.emit(f"[search] ИСКЛЮЧЕНИЕ: {e}")
             self.failed.emit(str(e)[:120])
             self.finished.emit([])
 
     def _search_one(self, prefix: str, source_id: str, url_template: str) -> list[dict]:
         try:
             command = [YTDLP_PATH, prefix + self.query, "--dump-json", "--flat-playlist"]
+            self.log_line.emit("$ " + " ".join(command))
             proc = subprocess.run(
                 command, capture_output=True, encoding="utf-8", errors="replace",
                 startupinfo=_startupinfo(), timeout=self.SEARCH_TIMEOUT_SEC,
             )
+            for ln in (proc.stderr or "").splitlines():
+                self.log_line.emit(f"[{source_id}] {ln}")
             items = []
             for line in proc.stdout.splitlines():
                 if not line.strip():
@@ -298,10 +318,13 @@ class SearchWorker(QThread):
                     "url": url_template.format(id=video_id),
                     "source": source_id,
                 })
+            self.log_line.emit(f"[{source_id}] найдено {len(items)} результатов")
             return items
         except subprocess.TimeoutExpired:
+            self.log_line.emit(f"[{source_id}] ТАЙМАУТ ({self.SEARCH_TIMEOUT_SEC} сек)")
             return []
-        except Exception:
+        except Exception as e:
+            self.log_line.emit(f"[{source_id}] ОШИБКА: {e}")
             return []
 
 
@@ -312,6 +335,7 @@ class PreviewStreamWorker(QThread):
     """Резолвит прямую ссылку на аудиопоток для предпрослушивания."""
 
     finished = pyqtSignal(str)  # прямая ссылка на поток ("" — ошибка)
+    log_line = pyqtSignal(str)  # для debug-панели
 
     def __init__(self, url: str, parent=None) -> None:
         super().__init__(parent)
@@ -320,10 +344,14 @@ class PreviewStreamWorker(QThread):
     def run(self) -> None:
         try:
             cmd = [YTDLP_PATH, "-g", "-f", "ba", self.url]
+            self.log_line.emit("$ " + " ".join(cmd))
             proc = subprocess.run(
                 cmd, capture_output=True, encoding="utf-8", errors="replace",
                 startupinfo=_startupinfo(), timeout=20,
             )
+            for ln in (proc.stderr or "").splitlines():
+                self.log_line.emit(ln)
             self.finished.emit(proc.stdout.strip())
-        except Exception:
+        except Exception as e:
+            self.log_line.emit(f"[preview] ОШИБКА: {e}")
             self.finished.emit("")

@@ -20,7 +20,7 @@ from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
+    QSizePolicy, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app import config, theme
@@ -112,14 +112,52 @@ class MainWindow(QMainWindow):
         columns.addWidget(self.right_panel, 3)
         root_layout.addLayout(columns)
 
+        self.debug_panel = self._build_debug_panel()
+        self.debug_panel.hide()
+        root_layout.addWidget(self.debug_panel)
+
+    def _build_debug_panel(self) -> QFrame:
+        panel = self._panel()
+        layout = QVBoxLayout(panel)
+
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("Debug-лог (вывод yt-dlp)"))
+        header_row.addStretch()
+        clear_btn = QPushButton("Очистить")
+        clear_btn.clicked.connect(lambda: self.debug_log.clear())
+        header_row.addWidget(clear_btn)
+        layout.addLayout(header_row)
+
+        self.debug_log = QTextEdit()
+        self.debug_log.setReadOnly(True)
+        self.debug_log.setFixedHeight(160)
+        self.debug_log.setStyleSheet(
+            "font-family: Consolas, 'Courier New', monospace; font-size: 11px;"
+        )
+        layout.addWidget(self.debug_log)
+        return panel
+
+    def _toggle_debug_mode(self) -> None:
+        visible = not self.debug_panel.isVisible()
+        self.debug_panel.setVisible(visible)
+        self.debug_btn.setText("Скрыть debug" if visible else "Debug режим")
+
+    def _append_debug_log(self, text: str) -> None:
+        self.debug_log.append(text)
+        scrollbar = self.debug_log.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def _build_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         title = QLabel("YouTube Music Downloader")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self.debug_btn = QPushButton("Debug режим")
+        self.debug_btn.clicked.connect(self._toggle_debug_mode)
         self.compact_btn = QPushButton("Компактный режим")
         self.compact_btn.clicked.connect(self._toggle_compact_mode)
         layout.addWidget(title)
         layout.addStretch()
+        layout.addWidget(self.debug_btn)
         layout.addWidget(self.compact_btn)
         return layout
 
@@ -332,6 +370,7 @@ class MainWindow(QMainWindow):
         """
         worker = MetadataWorker(url)
         self._active_metadata_workers.append(worker)
+        worker.log_line.connect(lambda ln: self._append_debug_log(f"[metadata] {ln}"))
 
         def _on_done(data: dict) -> None:
             self._metadata_cache[url] = data
@@ -479,6 +518,7 @@ class MainWindow(QMainWindow):
         thumb_bytes = cached.get("thumb_bytes") if cached else None
         self._download_worker = DownloadWorker(url, self.settings.save_folder, thumb_bytes=thumb_bytes)
         self._download_worker.progress.connect(self._on_download_progress)
+        self._download_worker.log_line.connect(lambda ln: self._append_debug_log(f"[download] {ln}"))
         self._download_worker.finished.connect(
             lambda ok, cover_ok: self._on_download_finished(ok, cover_ok, url, title, from_queue)
         )
@@ -528,6 +568,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"Ищем «{query}» на YouTube и YouTube Music...")
         self.search_input.setEnabled(False)
         self._search_worker = SearchWorker(query)
+        self._search_worker.log_line.connect(self._append_debug_log)
         self._search_worker.finished.connect(self._on_search_finished)
         self._search_worker.start()
 
@@ -625,10 +666,12 @@ class MainWindow(QMainWindow):
         self.preview_btn.setText("⏳ Загрузка...")
         self._set_status("Получаем аудиопоток для предпрослушивания...")
         self._preview_worker = PreviewStreamWorker(url)
+        self._preview_worker.log_line.connect(lambda ln: self._append_debug_log(f"[preview] {ln}"))
         self._preview_worker.finished.connect(self._on_preview_stream_ready)
         self._preview_worker.start()
 
         self._metadata_worker = MetadataWorker(url)
+        self._metadata_worker.log_line.connect(lambda ln: self._append_debug_log(f"[metadata] {ln}"))
         self._metadata_worker.finished.connect(self._on_metadata_ready)
         self._metadata_worker.start()
 
