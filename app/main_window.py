@@ -317,6 +317,9 @@ class MainWindow(QMainWindow):
         history_layout.addLayout(history_buttons)
         self.tabs.addTab(history_tab, "История")
 
+        # При запуске главной вкладкой является «Очередь», а не «Поиск»
+        self.tabs.setCurrentWidget(queue_tab)
+
         layout.addWidget(self.tabs)
         return panel
 
