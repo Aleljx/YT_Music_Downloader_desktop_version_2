@@ -1,11 +1,19 @@
 """
-Окно первого запуска.
+Окно первого запуска / окно обновления компонентов.
 
-Показывается, если в папке приложения нет yt-dlp.exe и/или ffmpeg.exe
-(см. app.config.missing_dependencies). Скачивает недостающее в фоновом
-потоке и сообщает прогресс через сигналы — сам процесс скачивания и
-распаковки вынесен в DependencyDownloadWorker, окно только отображает
-результат.
+Показывается в двух случаях:
+  - mode="missing" — в папке приложения нет yt-dlp.exe и/или ffmpeg.exe
+    (см. app.config.missing_dependencies). Ждёт нажатия кнопки.
+  - mode="update"  — компоненты есть, но устарели (см. app.update_check).
+    Скачивание стартует автоматически, без ожидания клика — пользователь
+    просто информируется, что сейчас идёт обновление.
+
+Скачивает в фоновом потоке и сообщает прогресс через сигналы — сам
+процесс скачивания и распаковки вынесен в DependencyDownloadWorker,
+окно только отображает результат. Для обновления и для первой установки
+используется одна и та же логика скачивания: она просто перезаписывает
+файл заново (DependencyDownloadWorker._download_file всегда скачивает
+актуальную "latest"-ссылку поверх старого файла).
 """
 
 import os
@@ -14,7 +22,7 @@ import tempfile
 import urllib.request
 import zipfile
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
@@ -118,31 +126,51 @@ class SetupWindow(QWidget):
 
     setup_finished = pyqtSignal()
 
-    def __init__(self, missing: list[str]) -> None:
+    def __init__(self, missing: list[str], mode: str = "missing") -> None:
+        """
+        mode="missing" — первый запуск, компонентов нет вообще, ждём клика.
+        mode="update"  — компоненты устарели, скачивание стартует само,
+                          сразу после показа окна.
+        """
         super().__init__()
         self.missing = missing
+        self.mode = mode
         self._worker: DependencyDownloadWorker | None = None
 
-        self.setWindowTitle("Первый запуск — установка компонентов")
+        title_text = "Доступно обновление" if mode == "update" else "Первый запуск — установка компонентов"
+        self.setWindowTitle(title_text)
         self.resize(420, 200)
         self._build_ui()
+
+        if mode == "update":
+            # Небольшая пауза перед стартом — чтобы окно успело отрисоваться
+            # и пользователь увидел текст прежде, чем побежит прогресс-бар.
+            QTimer.singleShot(300, self._start_download)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        title = QLabel("Нужно скачать пару компонентов")
+        is_update = self.mode == "update"
+        names = ", ".join(self.missing)
+
+        title = QLabel("Нашли обновление компонентов" if is_update else "Нужно скачать пару компонентов")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         layout.addWidget(title)
 
-        names = ", ".join(self.missing)
-        description = QLabel(
-            f"Отсутствуют: {names}.\n"
-            "Это разовая установка, дальше приложение будет открываться сразу."
-        )
+        if is_update:
+            description = QLabel(
+                f"Вышла новая версия: {names}.\n"
+                "Обновляем автоматически, это недолго — программа откроется, как только всё будет готово."
+            )
+        else:
+            description = QLabel(
+                f"Отсутствуют: {names}.\n"
+                "Это разовая установка, дальше приложение будет открываться сразу."
+            )
         description.setWordWrap(True)
         layout.addWidget(description)
 
-        self.status_label = QLabel("Готово к загрузке")
+        self.status_label = QLabel("Обновляем..." if is_update else "Готово к загрузке")
         self.status_label.setObjectName("secondary")
         layout.addWidget(self.status_label)
 
@@ -154,6 +182,8 @@ class SetupWindow(QWidget):
         self.start_btn.setObjectName("accent")
         self.start_btn.clicked.connect(self._start_download)
         layout.addWidget(self.start_btn)
+        if is_update:
+            self.start_btn.hide()  # обновление стартует само, кнопка не нужна
 
         self.retry_btn = QPushButton("Повторить")
         self.retry_btn.setObjectName("accent")
@@ -161,9 +191,17 @@ class SetupWindow(QWidget):
         self.retry_btn.hide()
         layout.addWidget(self.retry_btn)
 
+        # Только для обновления: старые компоненты работают, так что при
+        # неудачной загрузке не блокируем запуск приложения.
+        self.skip_btn = QPushButton("Пропустить и открыть программу")
+        self.skip_btn.clicked.connect(self.setup_finished.emit)
+        self.skip_btn.hide()
+        layout.addWidget(self.skip_btn)
+
     def _start_download(self) -> None:
         self.start_btn.hide()
         self.retry_btn.hide()
+        self.skip_btn.hide()
         self.progress_bar.setValue(0)
         self.status_label.setText("Подготовка...")
 
@@ -180,3 +218,5 @@ class SetupWindow(QWidget):
         else:
             self.status_label.setText(f"Ошибка: {error_message}")
             self.retry_btn.show()
+            if self.mode == "update":
+                self.skip_btn.show()

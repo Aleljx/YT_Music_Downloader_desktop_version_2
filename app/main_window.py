@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app import config, theme
+from app.help_window import HelpWindow
 from app.downloader import (
     DownloadWorker, MetadataWorker, PreviewStreamWorker, SearchWorker,
 )
@@ -142,6 +143,19 @@ class MainWindow(QMainWindow):
         self.debug_panel.setVisible(visible)
         self.debug_btn.setText("Скрыть debug" if visible else "Debug режим")
 
+    def _open_help(self) -> None:
+        """Окно «Помощь»; ошибки, уже попавшие в debug-лог, в нём подсвечиваются."""
+        log_text = self.debug_log.toPlainText()
+        win = getattr(self, "_help_window", None)
+        if win is not None and win.isVisible():
+            win.set_log_text(log_text)
+        else:
+            win = HelpWindow(log_text, parent=self)
+            self._help_window = win
+        win.show()
+        win.raise_()
+        win.activateWindow()
+
     def _append_debug_log(self, text: str) -> None:
         self.debug_log.append(text)
         scrollbar = self.debug_log.verticalScrollBar()
@@ -151,12 +165,15 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         title = QLabel("YouTube Music Downloader")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self.help_btn = QPushButton("Помощь")
+        self.help_btn.clicked.connect(self._open_help)
         self.debug_btn = QPushButton("Debug режим")
         self.debug_btn.clicked.connect(self._toggle_debug_mode)
         self.compact_btn = QPushButton("Компактный режим")
         self.compact_btn.clicked.connect(self._toggle_compact_mode)
         layout.addWidget(title)
         layout.addStretch()
+        layout.addWidget(self.help_btn)
         layout.addWidget(self.debug_btn)
         layout.addWidget(self.compact_btn)
         return layout
