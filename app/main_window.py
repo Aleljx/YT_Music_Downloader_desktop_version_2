@@ -15,15 +15,17 @@ import datetime
 import os
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QClipboard, QFontMetrics, QPixmap
+from PyQt6.QtCore import QRect
+from PyQt6.QtGui import QClipboard, QColor, QFontMetrics, QPixmap
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QSizePolicy, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QSizePolicy, QStyle, QStyledItemDelegate, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app import config, theme
+from app.confirm_dialog import confirm_clear_queue, confirm_remove_from_queue
 from app.help_window import HelpWindow
 from app.downloader import (
     DownloadWorker, MetadataWorker, PreviewStreamWorker, SearchWorker,
@@ -49,6 +51,68 @@ class HoverListWidget(QListWidget):
     def leaveEvent(self, event) -> None:
         self.mouse_left.emit()
         super().leaveEvent(event)
+
+
+REMOVE_BTN_SIZE = 22
+REMOVE_BTN_MARGIN = 6
+
+
+def _remove_btn_rect(item_rect: QRect) -> QRect:
+    return QRect(
+        item_rect.right() - REMOVE_BTN_MARGIN - REMOVE_BTN_SIZE,
+        item_rect.center().y() - REMOVE_BTN_SIZE // 2,
+        REMOVE_BTN_SIZE, REMOVE_BTN_SIZE,
+    )
+
+
+class _QueueDelegate(QStyledItemDelegate):
+    """Рисует обычную строку и справа кнопку «✕» (без отдельных виджетов — надёжнее)."""
+
+    def paint(self, painter, option, index) -> None:
+        super().paint(painter, option, index)
+        painter.save()
+        rect = _remove_btn_rect(option.rect)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        painter.setPen(QColor("#d64545") if hovered else QColor("#888888"))
+        painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), "✕")
+        painter.restore()
+
+
+class QueueListWidget(HoverListWidget):
+    """Список очереди: клик по «✕» в строке сообщает remove_requested(item)."""
+
+    remove_requested = pyqtSignal(object)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setItemDelegate(_QueueDelegate(self))
+        self.setMouseTracking(True)
+
+    def _item_with_btn_at(self, pos):
+        item = self.itemAt(pos)
+        if item is not None and _remove_btn_rect(self.visualItemRect(item)).contains(pos):
+            return item
+        return None
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._item_with_btn_at(event.position().toPoint()):
+            event.accept()  # клик по «✕» не должен выделять строку
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            item = self._item_with_btn_at(event.position().toPoint())
+            if item is not None:
+                self.remove_requested.emit(item)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        over = self._item_with_btn_at(event.position().toPoint()) is not None
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -284,16 +348,19 @@ class MainWindow(QMainWindow):
         # -- Очередь --
         queue_tab = QWidget()
         queue_layout = QVBoxLayout(queue_tab)
-        self.queue_list = HoverListWidget()
+        self.queue_list = QueueListWidget()
+        self.queue_list.remove_requested.connect(self._on_remove_clicked)
         self.queue_list.setMouseTracking(True)
         self.queue_list.itemEntered.connect(self._on_list_item_hovered)
         self.queue_list.mouse_left.connect(self._restore_preview)
+        self.queue_list.setStyleSheet("QListWidget::item { padding-right: 32px; }")
+        self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # место под «✕»
         queue_layout.addWidget(self.queue_list)
         queue_buttons = QHBoxLayout()
         self.start_queue_btn = QPushButton("▶ Скачать очередь")
         self.start_queue_btn.setObjectName("accent")
         self.start_queue_btn.clicked.connect(self._maybe_process_queue)
-        remove_btn = QPushButton("Удалить выбранное")
+        remove_btn = QPushButton("Очистить очередь")
         remove_btn.clicked.connect(self._remove_selected_from_queue)
         queue_buttons.addWidget(self.start_queue_btn)
         queue_buttons.addWidget(remove_btn)
@@ -506,11 +573,42 @@ class MainWindow(QMainWindow):
         self.queue_list.addItem(item)
         return item
 
+    def _on_remove_clicked(self, item: QListWidgetItem) -> None:
+        self._remove_from_queue_with_confirm([item])
+
+    def _remove_from_queue_with_confirm(self, items: list) -> None:
+        # Трек, который качается прямо сейчас (он всегда первый), удалять нельзя
+        worker = getattr(self, "_download_worker", None)
+        downloading = worker is not None and worker.isRunning()
+        items = [it for it in items if not (downloading and self.queue_list.row(it) == 0)]
+        if not items:
+            self._set_status("Этот трек сейчас скачивается — удалить его нельзя")
+            return
+        if not confirm_remove_from_queue(self):
+            return
+        for item in items:
+            row = self.queue_list.row(item)
+            if row < 0:
+                continue
+            if row < len(self.download_queue):
+                self.download_queue.pop(row)
+            self.queue_list.takeItem(row)
+
     def _remove_selected_from_queue(self) -> None:
-        for item in self.queue_list.selectedItems():
-            url = item.data(Qt.ItemDataRole.UserRole)
-            self.download_queue = [q for q in self.download_queue if q["url"] != url]
-            self.queue_list.takeItem(self.queue_list.row(item))
+        """Кнопка «Очистить очередь»: удаляет всю очередь после подтверждения."""
+        worker = getattr(self, "_download_worker", None)
+        downloading = worker is not None and worker.isRunning()
+        # трек, который качается сейчас (первый), остаётся в очереди
+        keep = 1 if downloading else 0
+        if self.queue_list.count() <= keep:
+            self._set_status("Очередь пуста" if not keep else "Сейчас качается последний трек — удалять нечего")
+            return
+        if not confirm_clear_queue(self):
+            return
+        del self.download_queue[keep:]
+        while self.queue_list.count() > keep:
+            self.queue_list.takeItem(self.queue_list.count() - 1)
+        self._set_status("Очередь очищена")
 
     def _maybe_process_queue(self) -> None:
         if self.current_download_url is not None:
