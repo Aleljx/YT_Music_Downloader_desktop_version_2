@@ -22,12 +22,13 @@ import tempfile
 import urllib.request
 import zipfile
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from app import config
+from app.shortcut import create_desktop_shortcut
 
 
 # ─────────────────────────────────────────────
@@ -35,7 +36,7 @@ from app import config
 # ─────────────────────────────────────────────
 class DependencyDownloadWorker(QThread):
     """
-    Скачивает недостающие yt-dlp.exe / ffmpeg.exe в BASE_DIR.
+    Скачивает недостающие yt-dlp.exe / ffmpeg.exe в папку данных приложения (config.APP_DATA_DIR).
     Работает по списку missing (например ["yt-dlp.exe", "ffmpeg.exe"]).
     """
 
@@ -100,8 +101,7 @@ class DependencyDownloadWorker(QThread):
             # ffprobe тоже пригодится yt-dlp для чтения метаданных — копируем, если есть
             ffprobe_exe = self._find_file(extract_dir, "ffprobe.exe")
             if ffprobe_exe:
-                ffprobe_dest = os.path.join(config.BASE_DIR, "ffprobe.exe")
-                shutil.copy(ffprobe_exe, ffprobe_dest)
+                shutil.copy(ffprobe_exe, config.FFPROBE_PATH)
 
     @staticmethod
     def _find_file(root_dir: str, filename: str) -> str | None:
@@ -139,7 +139,7 @@ class SetupWindow(QWidget):
 
         title_text = "Доступно обновление" if mode == "update" else "Первый запуск — установка компонентов"
         self.setWindowTitle(title_text)
-        self.resize(420, 200)
+        self.resize(460, 330)
         self._build_ui()
 
         if mode == "update":
@@ -165,10 +165,17 @@ class SetupWindow(QWidget):
         else:
             description = QLabel(
                 f"Отсутствуют: {names}.\n"
-                "Это разовая установка, дальше приложение будет открываться сразу."
+                "Это разовая установка, дальше приложение будет открываться сразу.\n"
+                "Всё необходимое скачается автоматически в папку приложения:"
             )
         description.setWordWrap(True)
         layout.addWidget(description)
+
+        self.path_label = QLabel(config.APP_DATA_DIR)
+        self.path_label.setWordWrap(True)
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.path_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.path_label)
 
         self.status_label = QLabel("Обновляем..." if is_update else "Готово к загрузке")
         self.status_label.setObjectName("secondary")
@@ -193,6 +200,24 @@ class SetupWindow(QWidget):
 
         # Только для обновления: старые компоненты работают, так что при
         # неудачной загрузке не блокируем запуск приложения.
+        # Только для первой установки: после успеха говорим, куда всё сохранено
+        self.done_label = QLabel()
+        self.done_label.setWordWrap(True)
+        self.done_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.done_label.hide()
+        layout.addWidget(self.done_label)
+
+        self.shortcut_btn = QPushButton("Создать ярлык на рабочем столе")
+        self.shortcut_btn.clicked.connect(self._create_shortcut)
+        self.shortcut_btn.hide()
+        layout.addWidget(self.shortcut_btn)
+
+        self.continue_btn = QPushButton("Продолжить")
+        self.continue_btn.setObjectName("accent")
+        self.continue_btn.clicked.connect(self.setup_finished.emit)
+        self.continue_btn.hide()
+        layout.addWidget(self.continue_btn)
+
         self.skip_btn = QPushButton("Пропустить и открыть программу")
         self.skip_btn.clicked.connect(self.setup_finished.emit)
         self.skip_btn.hide()
@@ -214,9 +239,28 @@ class SetupWindow(QWidget):
     def _on_finished(self, ok: bool, error_message: str) -> None:
         if ok:
             self.status_label.setText("Готово!")
-            self.setup_finished.emit()
+            if self.mode == "update":
+                self.setup_finished.emit()  # обновление — молча открываем программу
+            else:
+                self.done_label.setText(
+                    "Файлы приложения сохранены в папку:\n"
+                    f"{config.APP_DATA_DIR}\n\n"
+                    "Здесь хранятся: " + ", ".join(config.DATA_FILE_NAMES) + "."
+                )
+                self.done_label.show()
+                self.shortcut_btn.show()
+                self.continue_btn.show()
         else:
             self.status_label.setText(f"Ошибка: {error_message}")
             self.retry_btn.show()
             if self.mode == "update":
                 self.skip_btn.show()
+
+    def _create_shortcut(self) -> None:
+        ok, info = create_desktop_shortcut()
+        if ok:
+            self.shortcut_btn.setEnabled(False)
+            self.shortcut_btn.setText("✓ Ярлык создан на рабочем столе")
+            self.status_label.setText(f"Ярлык создан: {info}")
+        else:
+            self.status_label.setText(f"Не удалось создать ярлык: {info}")

@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.config import BASE_DIR, YTDLP_PATH
+from app.config import APP_DATA_DIR, YTDLP_PATH
 from app.image_utils import process_cover_image
 
 
@@ -151,7 +151,7 @@ class DownloadWorker(QThread):
             YTDLP_PATH, "-f", "ba", "-x",
             "--audio-format", "mp3", "--audio-quality", "0",
             "--embed-metadata",
-            "--ffmpeg-location", BASE_DIR,
+            "--ffmpeg-location", APP_DATA_DIR,
             "--newline", "-o", output_template,
             "--print-to-file", "after_move:filepath", filepath_tmp,
             self.url,

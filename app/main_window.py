@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app import config, theme
+from app.about_window import AboutWindow
 from app.background import BlobBackground
 from app.confirm_dialog import confirm_clear_queue, confirm_remove_from_queue
 from app.help_window import HelpWindow
@@ -210,6 +211,9 @@ class MainWindow(QMainWindow):
         self.debug_panel.setVisible(visible)
         self.debug_btn.setText("Скрыть debug" if visible else "Debug режим")
 
+    def _open_about(self) -> None:
+        AboutWindow(self).exec()
+
     def _open_help(self) -> None:
         """Окно «Помощь»; ошибки, уже попавшие в debug-лог, в нём подсвечиваются."""
         log_text = self.debug_log.toPlainText()
@@ -232,6 +236,8 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         title = QLabel("YouTube Music Downloader")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self.about_btn = QPushButton("О программе")
+        self.about_btn.clicked.connect(self._open_about)
         self.help_btn = QPushButton("Помощь")
         self.help_btn.clicked.connect(self._open_help)
         self.debug_btn = QPushButton("Debug режим")
@@ -240,6 +246,7 @@ class MainWindow(QMainWindow):
         self.compact_btn.clicked.connect(self._toggle_compact_mode)
         layout.addWidget(title)
         layout.addStretch()
+        layout.addWidget(self.about_btn)
         layout.addWidget(self.help_btn)
         layout.addWidget(self.debug_btn)
         layout.addWidget(self.compact_btn)
