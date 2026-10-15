@@ -14,8 +14,11 @@
      - Если всё актуально — сразу открыть основное окно, готовое к работе.
 """
 
+import ctypes
+import os
 import sys
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from app import config
@@ -24,8 +27,30 @@ from app.setup_window import SetupWindow
 from app.update_check import UpdateCheckSplash, UpdateCheckWorker
 
 
+APP_USER_MODEL_ID = "YouTubeMusicDownloader.App"
+
+
+def setup_app_icon(app: QApplication) -> None:
+    """
+    Иконка приложения для заголовка окон и панели задач.
+
+    - app.setWindowIcon задаёт иконку всем окнам сразу (главное, установка, сплэш...).
+    - Без AppUserModelID Windows сочтёт программу просто «python.exe» и покажет
+      в панели задач иконку Python, поэтому задаём собственный идентификатор.
+    Если icon.ico не найден — молча остаётся стандартная иконка.
+    """
+    if os.name == "nt":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        except Exception:
+            pass
+    if os.path.exists(config.ICON_PATH):
+        app.setWindowIcon(QIcon(config.ICON_PATH))
+
+
 def main() -> None:
     app = QApplication(sys.argv)
+    setup_app_icon(app)
 
     # Храним ссылки на окна/воркеры на уровне функции, чтобы Python
     # не удалил их сборщиком мусора сразу после создания.
