@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app import config, theme
+from app.background import BlobBackground
 from app.confirm_dialog import confirm_clear_queue, confirm_remove_from_queue
 from app.help_window import HelpWindow
 from app.downloader import (
@@ -124,6 +125,7 @@ class MainWindow(QMainWindow):
         self.download_queue: list[dict] = []
         self.current_download_url: str | None = None
         self._compact = False
+        self._previous_appearance = "System"
 
         # "Активный" трек — то, что реально будет скачано по кнопке "Скачать сейчас".
         # Устанавливается либо из поля ссылки, либо кликом по результату поиска —
@@ -153,7 +155,8 @@ class MainWindow(QMainWindow):
     #  Сборка интерфейса
     # ─────────────────────────────────────────────
     def _build_ui(self) -> None:
-        root = QWidget()
+        root = BlobBackground()
+        self.background = root
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(12, 12, 12, 12)
@@ -313,6 +316,12 @@ class MainWindow(QMainWindow):
         colors_row.addStretch()
         layout.addLayout(colors_row)
 
+        self.beautiful_btn = QPushButton("✨ Красивая тема")
+        self.beautiful_btn.setCheckable(True)
+        self.beautiful_btn.setChecked(self.settings.appearance_mode == theme.BEAUTIFUL_MODE)
+        self.beautiful_btn.clicked.connect(self._toggle_beautiful_theme)
+        layout.addWidget(self.beautiful_btn)
+
         layout.addStretch()
         return panel
 
@@ -386,6 +395,7 @@ class MainWindow(QMainWindow):
 
         # При запуске главной вкладкой является «Очередь», а не «Поиск»
         self.tabs.setCurrentWidget(queue_tab)
+        self._refresh_download_buttons()
 
         layout.addWidget(self.tabs)
         return panel
@@ -443,7 +453,19 @@ class MainWindow(QMainWindow):
     #  Тема
     # ─────────────────────────────────────────────
     def _apply_theme(self) -> None:
+        beautiful = self.settings.appearance_mode == theme.BEAUTIFUL_MODE
         theme.apply_theme(QApplication.instance(), self.settings.accent_color, self.settings.appearance_mode)
+        self.background.configure(beautiful, self.settings.accent_color)
+        self.beautiful_btn.setChecked(beautiful)
+
+    def _toggle_beautiful_theme(self) -> None:
+        if self.settings.appearance_mode == theme.BEAUTIFUL_MODE:
+            self.settings.appearance_mode = self._previous_appearance
+        else:
+            self._previous_appearance = self.settings.appearance_mode
+            self.settings.appearance_mode = theme.BEAUTIFUL_MODE
+        self.settings.save()
+        self._apply_theme()
 
     def _set_accent_color(self, color: str) -> None:
         self.settings.accent_color = color
@@ -571,6 +593,7 @@ class MainWindow(QMainWindow):
         item = QListWidgetItem(title)
         item.setData(Qt.ItemDataRole.UserRole, url)
         self.queue_list.addItem(item)
+        self._refresh_download_buttons()
         return item
 
     def _on_remove_clicked(self, item: QListWidgetItem) -> None:
@@ -593,6 +616,7 @@ class MainWindow(QMainWindow):
             if row < len(self.download_queue):
                 self.download_queue.pop(row)
             self.queue_list.takeItem(row)
+        self._refresh_download_buttons()
 
     def _remove_selected_from_queue(self) -> None:
         """Кнопка «Очистить очередь»: удаляет всю очередь после подтверждения."""
@@ -608,7 +632,19 @@ class MainWindow(QMainWindow):
         del self.download_queue[keep:]
         while self.queue_list.count() > keep:
             self.queue_list.takeItem(self.queue_list.count() - 1)
+        self._refresh_download_buttons()
         self._set_status("Очередь очищена")
+
+    def _refresh_download_buttons(self) -> None:
+        """«Скачать сейчас» доступна, только если очередь пуста и ничего не качается;
+        когда в очереди есть треки — работает «Скачать очередь»."""
+        idle = self.current_download_url is None
+        has_queue = bool(self.download_queue)
+        self.download_now_btn.setEnabled(idle and not has_queue)
+        self.download_now_btn.setToolTip(
+            "В очереди есть треки — используйте «Скачать очередь»" if has_queue else ""
+        )
+        self.start_queue_btn.setEnabled(idle and has_queue)
 
     def _maybe_process_queue(self) -> None:
         if self.current_download_url is not None:
@@ -627,7 +663,7 @@ class MainWindow(QMainWindow):
             return
 
         self.current_download_url = url
-        self.download_now_btn.setEnabled(False)
+        self._refresh_download_buttons()
         self.progress_bar.setValue(0)
         self.progress_label.setText("Подготовка...")
         self._set_status(f"Скачиваем: {title or url}")
@@ -650,7 +686,6 @@ class MainWindow(QMainWindow):
         self, ok: bool, cover_embedded: bool, url: str, title: str | None, from_queue: bool
     ) -> None:
         self.current_download_url = None
-        self.download_now_btn.setEnabled(True)
         self.progress_label.setText("Готово" if ok else "Ошибка скачивания")
 
         if ok:
@@ -670,6 +705,7 @@ class MainWindow(QMainWindow):
             self.download_queue.pop(0)
             self.queue_list.takeItem(0)
 
+        self._refresh_download_buttons()
         self._maybe_process_queue()
 
     # ─────────────────────────────────────────────

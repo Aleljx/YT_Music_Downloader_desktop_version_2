@@ -72,6 +72,20 @@ _DARK_PALETTE = {
     "text_secondary": "#9a9a9a",
 }
 
+# «Красивая тема»: глубокий чёрный фон окна (его рисует app.background.BlobBackground),
+# панели и элементы — полупрозрачные, чтобы цветные пятна мягко просвечивали сквозь них.
+BEAUTIFUL_MODE = "Beautiful"
+
+_BEAUTIFUL_PALETTE = {
+    "bg": "transparent",
+    "window": "#000000",
+    "surface": "rgba(10, 10, 12, 105)",
+    "surface_alt": "rgba(255, 255, 255, 22)",
+    "border": "rgba(255, 255, 255, 38)",
+    "text": "#ededed",
+    "text_secondary": "#a8a8a8",
+}
+
 _LIGHT_PALETTE = {
     "bg": "#f2f2f2",
     "surface": "#ffffff",
@@ -85,8 +99,10 @@ _LIGHT_PALETTE = {
 # ─────────────────────────────────────────────
 #  Сборка итогового QSS
 # ─────────────────────────────────────────────
-def build_stylesheet(accent_color: str, dark: bool) -> str:
-    p = _DARK_PALETTE if dark else _LIGHT_PALETTE
+def build_stylesheet(accent_color: str, dark: bool, beautiful: bool = False) -> str:
+    p = _BEAUTIFUL_PALETTE if beautiful else (_DARK_PALETTE if dark else _LIGHT_PALETTE)
+    p = {"window": p["bg"], **p}  # у обычных тем фон окна == bg
+    dark = dark or beautiful
     accent_hover = _shade(accent_color, 1.15 if dark else 0.9)
     accent_pressed = _shade(accent_color, 0.85 if dark else 0.75)
 
@@ -98,8 +114,17 @@ def build_stylesheet(accent_color: str, dark: bool) -> str:
         font-size: 13px;
     }}
 
-    QMainWindow {{
-        background-color: {p['bg']};
+    QMainWindow, QDialog {{
+        background-color: {p['window']};
+    }}
+
+    /* Подписи и полоса вкладок не должны закрашиваться цветом фона окна
+       поверх светлых/тёмных панелей — иначе вокруг текста видны «плашки». */
+    QLabel {{
+        background-color: transparent;
+    }}
+    QTabBar {{
+        background-color: transparent;
     }}
 
     /* ---- Панели-контейнеры ---- */
@@ -218,10 +243,28 @@ def build_stylesheet(accent_color: str, dark: bool) -> str:
     QLabel#secondary {{
         color: {p['text_secondary']};
     }}
+    {_beautiful_extras(p, accent_color) if beautiful else ""}
+    """
+
+
+def _beautiful_extras(p: dict, accent_color: str) -> str:
+    """Правила, нужные только потому, что в этой теме QWidget прозрачный."""
+    return f"""
+    QTextEdit, QTextBrowser {{
+        background-color: rgba(8, 8, 10, 200);
+        border: 1px solid {p['border']};
+        border-radius: 6px;
+    }}
+    QToolTip {{
+        background-color: #16161a;
+        color: {p['text']};
+        border: 1px solid {p['border']};
+    }}
     """
 
 
 def apply_theme(app: QApplication, accent_color: str, appearance_mode: str) -> None:
     """Удобный вход из main.py/main_window.py: считает тему и применяет её ко всему приложению."""
-    dark = resolve_dark_mode(appearance_mode)
-    app.setStyleSheet(build_stylesheet(accent_color, dark))
+    beautiful = appearance_mode == BEAUTIFUL_MODE
+    dark = beautiful or resolve_dark_mode(appearance_mode)
+    app.setStyleSheet(build_stylesheet(accent_color, dark, beautiful))
