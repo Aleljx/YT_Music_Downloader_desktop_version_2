@@ -8,7 +8,7 @@ from app import config
 from app.i18n import tr
 
 APP_NAME = "YouTube Music Downloader"
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 
 ICON_AUTHOR_URL = "https://www.youtube.com/channel/UCLQTyU9nJ7V_BF1kRmytalw"
 
