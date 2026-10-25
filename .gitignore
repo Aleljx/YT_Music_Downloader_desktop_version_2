@@ -1,0 +1,20 @@
+# Среда Python и зависимости
+.venv/
+__pycache__/
+
+# Сборка и бинарники (PyInstaller)
+build/
+dist/
+*.spec
+YouTubeMusicDownloader.spec
+
+# Внешние исполняемые файлы (ffmpeg, ffprobe, yt-dlp)
+ffmpeg.exe
+ffprobe.exe
+yt-dlp.exe
+build.bat
+
+# Локальные данные и настройки пользователя
+history.json
+settings.json
+installer.iss
