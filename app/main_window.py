@@ -19,7 +19,7 @@ from PyQt6.QtCore import QRect
 from PyQt6.QtGui import QClipboard, QColor, QFontMetrics, QPixmap
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
     QSizePolicy, QStyle, QStyledItemDelegate, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -28,7 +28,9 @@ from app import config, theme
 from app.about_window import AboutWindow
 from app.background import BlobBackground
 from app.confirm_dialog import confirm_clear_history, confirm_clear_queue, confirm_remove_from_queue
+from app import i18n
 from app.help_window import HelpWindow
+from app.i18n import tr
 from app.downloader import (
     DownloadWorker, MetadataWorker, PreviewStreamWorker, SearchWorker,
 )
@@ -121,6 +123,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.settings = config.Settings()
+        # Язык интерфейса: сохранённый в настройках, иначе язык системы
+        i18n.set_language(self.settings.language or i18n.detect_system_language())
         self.history = config.History()
 
         self.download_queue: list[dict] = []
@@ -133,6 +137,7 @@ class MainWindow(QMainWindow):
         # они не могут быть источником одновременно (см. _on_url_input_changed
         # и _on_search_result_selected).
         self._active_url: str | None = None
+        self._last_hovered_queue_url: str | None = None  # последний трек очереди под курсором
 
         # Кэш метаданных по ссылке, чтобы не запрашивать yt-dlp повторно
         # при каждом наведении мыши на один и тот же трек.
@@ -167,7 +172,7 @@ class MainWindow(QMainWindow):
 
         # Единая строка статуса — сюда пишутся все фоновые действия программы:
         # "Собираем метаданные...", "Ищем треки...", "Скачивание..." и т.д.
-        self.status_label = QLabel("Готово к работе")
+        self.status_label = QLabel(tr("status.ready"))
         self.status_label.setObjectName("secondary")
         root_layout.addWidget(self.status_label)
 
@@ -190,11 +195,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
 
         header_row = QHBoxLayout()
-        header_row.addWidget(QLabel("Debug-лог (вывод yt-dlp)"))
+        self.debug_title_label = QLabel(tr("ui.debug_log_title"))
+        header_row.addWidget(self.debug_title_label)
         header_row.addStretch()
-        clear_btn = QPushButton("Очистить")
-        clear_btn.clicked.connect(lambda: self.debug_log.clear())
-        header_row.addWidget(clear_btn)
+        self.debug_clear_btn = QPushButton(tr("ui.clear"))
+        self.debug_clear_btn.clicked.connect(lambda: self.debug_log.clear())
+        header_row.addWidget(self.debug_clear_btn)
         layout.addLayout(header_row)
 
         self.debug_log = QTextEdit()
@@ -209,7 +215,7 @@ class MainWindow(QMainWindow):
     def _toggle_debug_mode(self) -> None:
         visible = not self.debug_panel.isVisible()
         self.debug_panel.setVisible(visible)
-        self.debug_btn.setText("Скрыть debug" if visible else "Debug режим")
+        self.debug_btn.setText(tr("ui.debug_hide") if visible else tr("ui.debug"))
 
     def _open_about(self) -> None:
         AboutWindow(self).exec()
@@ -236,16 +242,23 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         title = QLabel("YouTube Music Downloader")
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        self.about_btn = QPushButton("О программе")
+        self.language_combo = QComboBox()
+        for code, name in i18n.LANGUAGES.items():
+            self.language_combo.addItem(name, code)
+        self.language_combo.setCurrentIndex(self.language_combo.findData(i18n.current_language()))
+        self.language_combo.setToolTip(tr("ui.language_tooltip"))
+        self.language_combo.currentIndexChanged.connect(self._on_language_chosen)
+        self.about_btn = QPushButton(tr("ui.about"))
         self.about_btn.clicked.connect(self._open_about)
-        self.help_btn = QPushButton("Помощь")
+        self.help_btn = QPushButton(tr("ui.help"))
         self.help_btn.clicked.connect(self._open_help)
-        self.debug_btn = QPushButton("Debug режим")
+        self.debug_btn = QPushButton(tr("ui.debug"))
         self.debug_btn.clicked.connect(self._toggle_debug_mode)
-        self.compact_btn = QPushButton("Компактный режим")
+        self.compact_btn = QPushButton(tr("ui.compact"))
         self.compact_btn.clicked.connect(self._toggle_compact_mode)
         layout.addWidget(title)
         layout.addStretch()
+        layout.addWidget(self.language_combo)
         layout.addWidget(self.about_btn)
         layout.addWidget(self.help_btn)
         layout.addWidget(self.debug_btn)
@@ -266,7 +279,8 @@ class MainWindow(QMainWindow):
         panel = self._panel()
         layout = QVBoxLayout(panel)
 
-        layout.addWidget(QLabel("Вставь ссылку на музыку"))
+        self.paste_label = QLabel(tr("ui.paste_label"))
+        layout.addWidget(self.paste_label)
         url_row = QHBoxLayout()
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://www.youtube.com/watch?v=...")
@@ -282,22 +296,23 @@ class MainWindow(QMainWindow):
         url_row.addWidget(clear_btn)
         layout.addLayout(url_row)
 
-        layout.addWidget(QLabel("Папка сохранения"))
+        self.folder_title_label = QLabel(tr("ui.folder_label"))
+        layout.addWidget(self.folder_title_label)
         folder_row = QHBoxLayout()
         self.folder_label = QLabel(self.settings.save_folder)
         self.folder_label.setObjectName("secondary")
         self.folder_label.setWordWrap(True)
-        browse_btn = QPushButton("Обзор")
-        browse_btn.clicked.connect(self._choose_folder)
+        self.browse_btn = QPushButton(tr("ui.browse"))
+        self.browse_btn.clicked.connect(self._choose_folder)
         folder_row.addWidget(self.folder_label, 1)
-        folder_row.addWidget(browse_btn)
+        folder_row.addWidget(self.browse_btn)
         layout.addLayout(folder_row)
 
         buttons_row = QHBoxLayout()
-        self.download_now_btn = QPushButton("⬇ Скачать сейчас")
+        self.download_now_btn = QPushButton(tr("ui.download_now"))
         self.download_now_btn.setObjectName("accent")
         self.download_now_btn.clicked.connect(self._download_now)
-        self.add_queue_btn = QPushButton("＋ В очередь")
+        self.add_queue_btn = QPushButton(tr("ui.add_queue"))
         self.add_queue_btn.clicked.connect(self._add_current_url_to_queue)
         buttons_row.addWidget(self.download_now_btn)
         buttons_row.addWidget(self.add_queue_btn)
@@ -310,7 +325,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_label)
 
-        layout.addWidget(QLabel("Цвет темы"))
+        self.theme_label = QLabel(tr("ui.theme_color"))
+        layout.addWidget(self.theme_label)
         colors_row = QHBoxLayout()
         for color in theme.ACCENT_PRESETS:
             swatch = QPushButton()
@@ -323,7 +339,7 @@ class MainWindow(QMainWindow):
         colors_row.addStretch()
         layout.addLayout(colors_row)
 
-        self.beautiful_btn = QPushButton("✨ Красивая тема")
+        self.beautiful_btn = QPushButton(tr("ui.beautiful"))
         self.beautiful_btn.setCheckable(True)
         self.beautiful_btn.setChecked(self.settings.appearance_mode == theme.BEAUTIFUL_MODE)
         self.beautiful_btn.clicked.connect(self._toggle_beautiful_theme)
@@ -344,7 +360,7 @@ class MainWindow(QMainWindow):
         search_layout = QVBoxLayout(search_tab)
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Поиск музыки...")
+        self.search_input.setPlaceholderText(tr("ui.search_placeholder"))
         self.search_input.returnPressed.connect(self._run_search)
         search_btn = QPushButton("🔍")
         search_btn.setFixedWidth(36)
@@ -359,7 +375,7 @@ class MainWindow(QMainWindow):
         self.search_results_list.itemDoubleClicked.connect(self._on_search_result_chosen)
         self.search_results_list.mouse_left.connect(self._restore_preview)
         search_layout.addWidget(self.search_results_list)
-        self.tabs.addTab(search_tab, "Поиск")
+        self.tabs.addTab(search_tab, tr("tab.search"))
 
         # -- Очередь --
         queue_tab = QWidget()
@@ -369,21 +385,21 @@ class MainWindow(QMainWindow):
         self.queue_list.setMouseTracking(True)
         self.queue_list.itemEntered.connect(self._on_list_item_hovered)
         self.queue_list.itemClicked.connect(self._on_search_result_selected)
-        self.queue_list.mouse_left.connect(self._restore_preview)
+        self.queue_list.mouse_left.connect(self._on_queue_mouse_left)
         self.queue_list.setStyleSheet("QListWidget::item { padding-right: 32px; }")
         self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # место под «✕»
         queue_layout.addWidget(self.queue_list)
         queue_buttons = QHBoxLayout()
-        self.start_queue_btn = QPushButton("▶ Скачать очередь")
+        self.start_queue_btn = QPushButton(tr("ui.start_queue"))
         self.start_queue_btn.setObjectName("accent")
         self.start_queue_btn.clicked.connect(self._maybe_process_queue)
-        remove_btn = QPushButton("Очистить очередь")
-        remove_btn.clicked.connect(self._remove_selected_from_queue)
+        self.clear_queue_btn = QPushButton(tr("ui.clear_queue"))
+        self.clear_queue_btn.clicked.connect(self._remove_selected_from_queue)
         queue_buttons.addWidget(self.start_queue_btn)
-        queue_buttons.addWidget(remove_btn)
+        queue_buttons.addWidget(self.clear_queue_btn)
         queue_buttons.addStretch()
         queue_layout.addLayout(queue_buttons)
-        self.tabs.addTab(queue_tab, "Очередь")
+        self.tabs.addTab(queue_tab, tr("tab.queue"))
 
         # -- История --
         history_tab = QWidget()
@@ -395,12 +411,12 @@ class MainWindow(QMainWindow):
         self.history_list.mouse_left.connect(self._restore_preview)
         history_layout.addWidget(self.history_list)
         history_buttons = QHBoxLayout()
-        clear_history_btn = QPushButton("Очистить историю")
-        clear_history_btn.clicked.connect(self._clear_history)
-        history_buttons.addWidget(clear_history_btn)
+        self.clear_history_btn = QPushButton(tr("ui.clear_history"))
+        self.clear_history_btn.clicked.connect(self._clear_history)
+        history_buttons.addWidget(self.clear_history_btn)
         history_buttons.addStretch()
         history_layout.addLayout(history_buttons)
-        self.tabs.addTab(history_tab, "История")
+        self.tabs.addTab(history_tab, tr("tab.history"))
 
         # При запуске главной вкладкой является «Очередь», а не «Поиск»
         self.tabs.setCurrentWidget(queue_tab)
@@ -429,12 +445,12 @@ class MainWindow(QMainWindow):
 
         # Название/исполнитель — фиксированная высота в одну строку с эллипсисом,
         # чтобы длинные названия не растягивали панель по вертикали при наведении.
-        self.track_title_label = QLabel("Название трека")
+        self.track_title_label = QLabel(tr("track.title"))
         self.track_title_label.setFixedWidth(210)
         self.track_title_label.setFixedHeight(20)
         self.track_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.track_title_label.setStyleSheet("font-weight: 600;")
-        self.track_artist_label = QLabel("Исполнитель")
+        self.track_artist_label = QLabel(tr("track.artist"))
         self.track_artist_label.setFixedWidth(210)
         self.track_artist_label.setFixedHeight(18)
         self.track_artist_label.setObjectName("secondary")
@@ -442,7 +458,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.track_title_label)
         layout.addWidget(self.track_artist_label)
 
-        self.preview_btn = QPushButton("▶ Предпрослушать")
+        self.preview_btn = QPushButton(tr("preview.start"))
         self.preview_btn.setObjectName("accent")
         self.preview_btn.clicked.connect(self._toggle_preview)
         layout.addWidget(self.preview_btn)
@@ -457,6 +473,53 @@ class MainWindow(QMainWindow):
         elided = metrics.elidedText(text, Qt.TextElideMode.ElideRight, label.width())
         label.setText(elided)
         label.setToolTip(text)  # полное название доступно во всплывающей подсказке
+
+    # ─────────────────────────────────────────────
+    #  Язык интерфейса
+    # ─────────────────────────────────────────────
+    def _on_language_chosen(self) -> None:
+        code = self.language_combo.currentData()
+        if not code or code == i18n.current_language():
+            return
+        self.settings.language = code
+        self.settings.save()
+        i18n.set_language(code)
+        self._retranslate_ui()
+
+    def _retranslate_ui(self) -> None:
+        """Обновляет все надписи под выбранный язык — без перезапуска программы.
+        Тексты статусов и названия треков не трогаем: они описывают уже случившееся."""
+        self.about_btn.setText(tr("ui.about"))
+        self.help_btn.setText(tr("ui.help"))
+        self.debug_btn.setText(tr("ui.debug_hide") if self.debug_panel.isVisible() else tr("ui.debug"))
+        self.compact_btn.setText(tr("ui.full") if self._compact else tr("ui.compact"))
+        self.language_combo.setToolTip(tr("ui.language_tooltip"))
+        self.debug_title_label.setText(tr("ui.debug_log_title"))
+        self.debug_clear_btn.setText(tr("ui.clear"))
+        self.paste_label.setText(tr("ui.paste_label"))
+        self.folder_title_label.setText(tr("ui.folder_label"))
+        self.browse_btn.setText(tr("ui.browse"))
+        self.download_now_btn.setText(tr("ui.download_now"))
+        self.add_queue_btn.setText(tr("ui.add_queue"))
+        self.theme_label.setText(tr("ui.theme_color"))
+        self.beautiful_btn.setText(tr("ui.beautiful"))
+        self.search_input.setPlaceholderText(tr("ui.search_placeholder"))
+        self.tabs.setTabText(0, tr("tab.search"))
+        self.tabs.setTabText(1, tr("tab.queue"))
+        self.tabs.setTabText(2, tr("tab.history"))
+        self.start_queue_btn.setText(tr("ui.start_queue"))
+        self.clear_queue_btn.setText(tr("ui.clear_queue"))
+        self.clear_history_btn.setText(tr("ui.clear_history"))
+        self._refresh_download_buttons()
+        # кнопка предпрослушивания: «пауза», если играет, иначе «предпрослушать»
+        playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        self.preview_btn.setText(tr("preview.pause") if playing else tr("preview.start"))
+        if not self._current_target_url():
+            self._default_cover_state()
+        self._set_status(tr("status.ready"))
+        help_win = getattr(self, "_help_window", None)
+        if help_win is not None and help_win.isVisible():
+            help_win.retranslate()
 
     # ─────────────────────────────────────────────
     #  Тема
@@ -518,7 +581,7 @@ class MainWindow(QMainWindow):
         if not url:
             self._active_url = None
             self._default_cover_state()
-            self._set_status("Готово к работе")
+            self._set_status(tr("status.ready"))
             return
 
         self._active_url = url
@@ -527,14 +590,14 @@ class MainWindow(QMainWindow):
         cached = self._metadata_cache.get(url)
         if cached:
             self._on_metadata_ready(cached)
-            self._set_status("Готово: данные трека получены из кэша")
+            self._set_status(tr("status.metadata_cache"))
             return
 
-        self._set_status("Собираем метаданные для предпросмотра...")
+        self._set_status(tr("status.metadata_collecting"))
 
         def _on_done(data: dict) -> None:
             self._on_metadata_ready(data)
-            self._set_status("Готово: обложка и название получены")
+            self._set_status(tr("status.metadata_done"))
 
         self._fetch_metadata(url, _on_done)
 
@@ -554,7 +617,7 @@ class MainWindow(QMainWindow):
         self._default_cover_state()
 
     def _choose_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Выбери папку", self.settings.save_folder)
+        folder = QFileDialog.getExistingDirectory(self, tr("ui.choose_folder"), self.settings.save_folder)
         if folder:
             self.settings.save_folder = folder
             self.settings.save()
@@ -578,12 +641,12 @@ class MainWindow(QMainWindow):
         cached = self._metadata_cache.get(url)
         if cached and cached.get("title"):
             self._add_to_queue(url, cached["title"])
-            self._set_status(f"Добавлено в очередь: {cached['title']}")
+            self._set_status(tr("status.queued", title=cached["title"]))
         else:
             # Название ещё неизвестно — добавляем плейсхолдер и обновим его,
             # когда придут метаданные.
-            item = self._add_to_queue(url, "Получение информации...")
-            self._set_status("Добавлено в очередь, собираем название трека...")
+            item = self._add_to_queue(url, tr("queue.fetching"))
+            self._set_status(tr("status.queued_fetching"))
             self._fetch_metadata(url, lambda data, it=item: self._update_queue_item_title(it, url, data))
         self.url_input.clear()
 
@@ -593,7 +656,7 @@ class MainWindow(QMainWindow):
             return
         item.setText(title)
         for entry in self.download_queue:
-            if entry["url"] == url and entry["title"] == "Получение информации...":
+            if entry["url"] == url and entry["title"] == tr("queue.fetching"):
                 entry["title"] = title
                 break
 
@@ -614,17 +677,20 @@ class MainWindow(QMainWindow):
         downloading = worker is not None and worker.isRunning()
         items = [it for it in items if not (downloading and self.queue_list.row(it) == 0)]
         if not items:
-            self._set_status("Этот трек сейчас скачивается — удалить его нельзя")
+            self._set_status(tr("status.cannot_remove_downloading"))
             return
         if not confirm_remove_from_queue(self):
             return
+        removed: set = set()
         for item in items:
             row = self.queue_list.row(item)
             if row < 0:
                 continue
             if row < len(self.download_queue):
-                self.download_queue.pop(row)
+                removed.add(self.download_queue.pop(row)["url"])
             self.queue_list.takeItem(row)
+        remaining = {q["url"] for q in self.download_queue}
+        self._forget_removed_urls(removed - remaining)
         self._refresh_download_buttons()
 
     def _remove_selected_from_queue(self) -> None:
@@ -634,15 +700,17 @@ class MainWindow(QMainWindow):
         # трек, который качается сейчас (первый), остаётся в очереди
         keep = 1 if downloading else 0
         if self.queue_list.count() <= keep:
-            self._set_status("Очередь пуста" if not keep else "Сейчас качается последний трек — удалять нечего")
+            self._set_status(tr("status.queue_empty") if not keep else tr("status.queue_last_downloading"))
             return
         if not confirm_clear_queue(self):
             return
+        removed = {q["url"] for q in self.download_queue[keep:]}
         del self.download_queue[keep:]
+        self._forget_removed_urls(removed - {q["url"] for q in self.download_queue})
         while self.queue_list.count() > keep:
             self.queue_list.takeItem(self.queue_list.count() - 1)
         self._refresh_download_buttons()
-        self._set_status("Очередь очищена")
+        self._set_status(tr("status.queue_cleared"))
 
     def _refresh_download_buttons(self) -> None:
         """«Скачать сейчас» доступна, только если очередь пуста и ничего не качается;
@@ -651,7 +719,7 @@ class MainWindow(QMainWindow):
         has_queue = bool(self.download_queue)
         self.download_now_btn.setEnabled(idle and not has_queue)
         self.download_now_btn.setToolTip(
-            "В очереди есть треки — используйте «Скачать очередь»" if has_queue else ""
+            tr("queue.now_tooltip") if has_queue else ""
         )
         self.start_queue_btn.setEnabled(idle and has_queue)
 
@@ -661,21 +729,21 @@ class MainWindow(QMainWindow):
         if not self.download_queue:
             return
         next_item = self.download_queue[0]
-        self._set_status(f"Начинаем скачивание из очереди: {next_item['title']}")
+        self._set_status(tr("status.queue_start", title=next_item["title"]))
         self._start_download(next_item["url"], title=next_item["title"], from_queue=True)
 
     def _start_download(self, url: str, title: str | None, from_queue: bool = False) -> None:
         if self.current_download_url is not None:
             # Уже идёт скачивание — просто добавим в очередь вместо параллельного запуска
             self._add_to_queue(url, title or url)
-            self._set_status("Уже идёт другое скачивание — трек добавлен в очередь")
+            self._set_status(tr("status.busy_added"))
             return
 
         self.current_download_url = url
         self._refresh_download_buttons()
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Подготовка...")
-        self._set_status(f"Скачиваем: {title or url}")
+        self.progress_label.setText(tr("progress.preparing"))
+        self._set_status(tr("status.downloading", title=title or url))
 
         cached = self._metadata_cache.get(url)
         thumb_bytes = cached.get("thumb_bytes") if cached else None
@@ -695,15 +763,15 @@ class MainWindow(QMainWindow):
         self, ok: bool, cover_embedded: bool, url: str, title: str | None, from_queue: bool
     ) -> None:
         self.current_download_url = None
-        self.progress_label.setText("Готово" if ok else "Ошибка скачивания")
+        self.progress_label.setText(tr("progress.done") if ok else tr("progress.error"))
 
         if ok:
-            status = f"Готово: «{title or url}» сохранён"
+            status = tr("status.downloaded", title=title or url)
             if not cover_embedded:
-                status += " (без обложки — подробности в консоли)"
+                status += tr("status.no_cover_suffix")
             self._set_status(status)
         else:
-            self._set_status(f"Не удалось скачать «{title or url}»")
+            self._set_status(tr("status.download_failed", title=title or url))
 
         if ok:
             entry_title = title or url
@@ -727,8 +795,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_search_worker", None) and self._search_worker.isRunning():
             return  # предыдущий поиск ещё не завершился — не плодим параллельные запросы
         self.search_results_list.clear()
-        self.search_results_list.addItem("Ищем...")
-        self._set_status(f"Ищем «{query}» на YouTube и YouTube Music...")
+        self.search_results_list.addItem(tr("search.searching"))
+        self._set_status(tr("status.searching", query=query))
         self.search_input.setEnabled(False)
         self._search_worker = SearchWorker(query)
         self._search_worker.log_line.connect(self._append_debug_log)
@@ -739,15 +807,15 @@ class MainWindow(QMainWindow):
         self.search_input.setEnabled(True)
         self.search_results_list.clear()
         if not results:
-            self.search_results_list.addItem("Ничего не найдено")
-            self._set_status("Поиск завершён: ничего не найдено")
+            self.search_results_list.addItem(tr("search.none"))
+            self._set_status(tr("status.search_none"))
             return
         for r in results:
             tag = SOURCE_TAG.get(r["source"], "")
             item = QListWidgetItem(f"{tag}  {r['title']}")
             item.setData(Qt.ItemDataRole.UserRole, r)
             self.search_results_list.addItem(item)
-        self._set_status(f"Готово: найдено {len(results)} треков")
+        self._set_status(tr("status.search_found", n=len(results)))
 
     def _on_search_result_chosen(self, item: QListWidgetItem) -> None:
         data = item.data(Qt.ItemDataRole.UserRole)
@@ -781,13 +849,13 @@ class MainWindow(QMainWindow):
         cached = self._metadata_cache.get(url)
         if cached:
             self._on_metadata_ready(cached)
-            self._set_status(f"Выбран трек: {title}")
+            self._set_status(tr("status.selected", title=title))
         else:
-            self._set_status("Загружаем обложку и данные выбранного трека...")
+            self._set_status(tr("status.loading_selected"))
 
             def _on_done(meta: dict) -> None:
                 self._on_metadata_ready(meta)
-                self._set_status(f"Выбран трек: {title}")
+                self._set_status(tr("status.selected", title=title))
 
             self._fetch_metadata(url, _on_done)
 
@@ -801,6 +869,8 @@ class MainWindow(QMainWindow):
         if not data:
             return
         url = data["url"] if isinstance(data, dict) else data
+        if item.listWidget() is self.queue_list:
+            self._last_hovered_queue_url = url
 
         cached = self._metadata_cache.get(url)
         if cached:
@@ -820,7 +890,7 @@ class MainWindow(QMainWindow):
 
     def _clear_history(self) -> None:
         if not self.history.items:
-            self._set_status("История уже пуста")
+            self._set_status(tr("status.history_empty"))
             return
         if not confirm_clear_history(self):
             return
@@ -833,14 +903,14 @@ class MainWindow(QMainWindow):
     def _toggle_preview(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
-            self.preview_btn.setText("▶ Предпрослушать")
+            self.preview_btn.setText(tr("preview.start"))
             return
 
         url = self._current_target_url()
         if not url:
             return
-        self.preview_btn.setText("⏳ Загрузка...")
-        self._set_status("Получаем аудиопоток для предпрослушивания...")
+        self.preview_btn.setText(tr("preview.loading"))
+        self._set_status(tr("status.preview_getting"))
         self._preview_worker = PreviewStreamWorker(url)
         self._preview_worker.log_line.connect(lambda ln: self._append_debug_log(f"[preview] {ln}"))
         self._preview_worker.finished.connect(self._on_preview_stream_ready)
@@ -853,17 +923,17 @@ class MainWindow(QMainWindow):
 
     def _on_preview_stream_ready(self, stream_url: str) -> None:
         if not stream_url:
-            self.preview_btn.setText("▶ Предпрослушать")
-            self._set_status("Не удалось получить аудиопоток")
+            self.preview_btn.setText(tr("preview.start"))
+            self._set_status(tr("status.preview_failed"))
             return
         self.player.setSource(QUrl(stream_url))
         self.player.play()
-        self._set_status("Воспроизводим предпрослушивание")
-        self.preview_btn.setText("⏸ Пауза")
+        self._set_status(tr("status.preview_playing"))
+        self.preview_btn.setText(tr("preview.pause"))
 
     def _on_metadata_ready(self, data: dict) -> None:
-        self._set_elided_text(self.track_title_label, data.get("title") or "Название трека")
-        self._set_elided_text(self.track_artist_label, data.get("artist") or "Исполнитель")
+        self._set_elided_text(self.track_title_label, data.get("title") or tr("track.title"))
+        self._set_elided_text(self.track_artist_label, data.get("artist") or tr("track.artist"))
         thumb_bytes = data.get("thumb_bytes")
         if thumb_bytes:
             pixmap = QPixmap()
@@ -890,8 +960,33 @@ class MainWindow(QMainWindow):
         """Заглушка «ничего не выбрано» — серый квадрат с нотой."""
         self.cover_label.setPixmap(QPixmap())
         self.cover_label.setText("🎵")
-        self._set_elided_text(self.track_title_label, "Название трека")
-        self._set_elided_text(self.track_artist_label, "Исполнитель")
+        self._set_elided_text(self.track_title_label, tr("track.title"))
+        self._set_elided_text(self.track_artist_label, tr("track.artist"))
+
+    def _on_queue_mouse_left(self) -> None:
+        """
+        Курсор ушёл со списка очереди. Трек, на который наводили, становится
+        выбранным (как после клика) и остаётся в превью — иначе данные пропадали
+        бы, и до кнопки «Предпрослушать» нельзя было бы дойти. Исключение — когда
+        в поле ссылки введён адрес: он имеет приоритет, и превью вернётся к нему.
+        """
+        url = self._last_hovered_queue_url
+        if url and not self.url_input.text().strip():
+            for i in range(self.queue_list.count()):
+                item = self.queue_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == url:
+                    self._on_search_result_selected(item)  # активный трек + выделение + превью
+                    item.setSelected(True)
+                    return
+        self._restore_preview()
+
+    def _forget_removed_urls(self, removed: set) -> None:
+        """Убирает из превью трек, который только что удалили из очереди."""
+        if self._last_hovered_queue_url in removed:
+            self._last_hovered_queue_url = None
+        if self._active_url in removed and not self.url_input.text().strip():
+            self._active_url = None
+            self._default_cover_state()
 
     def _restore_preview(self) -> None:
         """
@@ -917,7 +1012,7 @@ class MainWindow(QMainWindow):
         self._compact = not self._compact
         self.center_panel.setVisible(not self._compact)
         self.right_panel.setVisible(not self._compact)
-        self.compact_btn.setText("Полный режим" if self._compact else "Компактный режим")
+        self.compact_btn.setText(tr("ui.full") if self._compact else tr("ui.compact"))
         if self._compact:
             self.resize(360, 420)
         else:

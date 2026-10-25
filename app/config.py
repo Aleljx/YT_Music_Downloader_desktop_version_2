@@ -104,7 +104,8 @@ class Settings:
     def __init__(self) -> None:
         self.accent_color: str = DEFAULT_ACCENT_COLOR
         self.save_folder: str = default_music_folder()
-        self.appearance_mode: str = "System"  # "Light" | "Dark" | "System"
+        self.appearance_mode: str = "System"  # "Light" | "Dark" | "System" | "Beautiful"
+        self.language: str = ""  # "ru" | "uk" | "en"; пусто — взять язык системы
         self._load()
 
     def _load(self) -> None:
@@ -114,12 +115,14 @@ class Settings:
         self.accent_color = data.get("accent_color", self.accent_color)
         self.save_folder = data.get("save_folder", self.save_folder)
         self.appearance_mode = data.get("appearance_mode", self.appearance_mode)
+        self.language = data.get("language", self.language)
 
     def save(self) -> None:
         self._write_json(SETTINGS_FILE, {
             "accent_color": self.accent_color,
             "save_folder": self.save_folder,
             "appearance_mode": self.appearance_mode,
+            "language": self.language,
         })
 
     @staticmethod

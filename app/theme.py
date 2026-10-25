@@ -174,6 +174,30 @@ def build_stylesheet(accent_color: str, dark: bool, beautiful: bool = False) -> 
         border: 1px solid {accent_color};
     }}
 
+    /* ---- Выбор языка (QComboBox) ---- */
+    QComboBox {{
+        background-color: {p['surface_alt']};
+        border: 1px solid {p['border']};
+        border-radius: 6px;
+        padding: 5px 10px;
+        color: {p['text']};
+    }}
+    QComboBox:hover {{
+        background-color: {p['border']};
+    }}
+    QComboBox::drop-down {{
+        border: none;
+        width: 18px;
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {p['window']};
+        color: {p['text']};
+        border: 1px solid {p['border']};
+        selection-background-color: {accent_color};
+        selection-color: white;
+        outline: none;
+    }}
+
     /* ---- Прогресс-бар ---- */
     QProgressBar {{
         background-color: {p['surface_alt']};

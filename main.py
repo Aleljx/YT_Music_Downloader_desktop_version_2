@@ -22,7 +22,7 @@ from PyQt6.QtCore import QFileInfo
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QFileIconProvider
 
-from app import config
+from app import config, i18n
 from app.main_window import MainWindow
 from app.setup_window import SetupWindow
 from app.update_check import UpdateCheckSplash, UpdateCheckWorker
@@ -56,6 +56,8 @@ def setup_app_icon(app: QApplication) -> None:
 def main() -> None:
     app = QApplication(sys.argv)
     setup_app_icon(app)
+    # Язык интерфейса нужен уже окнам установки/обновления — берём из настроек или системы
+    i18n.set_language(config.Settings().language or i18n.detect_system_language())
 
     # Храним ссылки на окна/воркеры на уровне функции, чтобы Python
     # не удалил их сборщиком мусора сразу после создания.

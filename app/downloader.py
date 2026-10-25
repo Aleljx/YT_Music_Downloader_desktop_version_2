@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.config import APP_DATA_DIR, YTDLP_PATH
+from app.i18n import tr
 from app.image_utils import process_cover_image
 
 
@@ -65,8 +66,8 @@ class MetadataWorker(QThread):
 
             data = json.loads(result.stdout)
 
-            title = data.get("title", "Неизвестно")
-            artist = data.get("artist") or data.get("uploader") or "Неизвестно"
+            title = data.get("title", tr("common.unknown"))
+            artist = data.get("artist") or data.get("uploader") or tr("common.unknown")
             duration_sec = data.get("duration", 0)
             duration = (
                 f"{int(duration_sec) // 60}:{int(duration_sec) % 60:02d}"
@@ -314,7 +315,7 @@ class SearchWorker(QThread):
                 if not video_id:
                     continue
                 items.append({
-                    "title": data.get("title", "Неизвестно"),
+                    "title": data.get("title", tr("common.unknown")),
                     "url": url_template.format(id=video_id),
                     "source": source_id,
                 })

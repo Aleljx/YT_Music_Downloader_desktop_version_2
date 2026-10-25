@@ -25,6 +25,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from app.config import FFMPEG_PATH, YTDLP_PATH
+from app.i18n import tr
 
 YTDLP_LATEST_RELEASE_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
 FFMPEG_LATEST_RELEASE_API = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
@@ -157,6 +158,6 @@ class UpdateCheckSplash(QWidget):
         self.setWindowTitle("YouTube Music Downloader")
         self.resize(320, 100)
         layout = QVBoxLayout(self)
-        label = QLabel("Проверяем обновления yt-dlp и ffmpeg...")
+        label = QLabel(tr("update.splash"))
         label.setWordWrap(True)
         layout.addWidget(label)

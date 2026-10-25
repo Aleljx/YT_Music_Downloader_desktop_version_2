@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app import config
+from app.i18n import tr
 from app.shortcut import create_desktop_shortcut
 
 
@@ -51,11 +52,11 @@ class DependencyDownloadWorker(QThread):
     def run(self) -> None:
         try:
             if "yt-dlp.exe" in self.missing:
-                self.status.emit("Скачивание yt-dlp...")
+                self.status.emit(tr("setup.dl_ytdlp"))
                 self._download_file(config.YTDLP_URL, config.YTDLP_PATH)
 
             if "ffmpeg.exe" in self.missing:
-                self.status.emit("Скачивание ffmpeg...")
+                self.status.emit(tr("setup.dl_ffmpeg"))
                 self._download_and_extract_ffmpeg()
 
             self.finished.emit(True, "")
@@ -84,7 +85,7 @@ class DependencyDownloadWorker(QThread):
             zip_path = os.path.join(tmp_dir, "ffmpeg.zip")
             self._download_file(config.FFMPEG_URL, zip_path)
 
-            self.status.emit("Распаковка ffmpeg...")
+            self.status.emit(tr("setup.extract_ffmpeg"))
             self.progress.emit(0.0)
             extract_dir = os.path.join(tmp_dir, "extracted")
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -95,7 +96,7 @@ class DependencyDownloadWorker(QThread):
 
             ffmpeg_exe = self._find_file(extract_dir, "ffmpeg.exe")
             if not ffmpeg_exe:
-                raise FileNotFoundError("ffmpeg.exe не найден в архиве после распаковки")
+                raise FileNotFoundError(tr("setup.ffmpeg_missing_in_zip"))
             shutil.copy(ffmpeg_exe, config.FFMPEG_PATH)
 
             # ffprobe тоже пригодится yt-dlp для чтения метаданных — копируем, если есть
@@ -137,7 +138,7 @@ class SetupWindow(QWidget):
         self.mode = mode
         self._worker: DependencyDownloadWorker | None = None
 
-        title_text = "Доступно обновление" if mode == "update" else "Первый запуск — установка компонентов"
+        title_text = tr("setup.title_update") if mode == "update" else tr("setup.title_missing")
         self.setWindowTitle(title_text)
         self.resize(460, 330)
         self._build_ui()
@@ -153,21 +154,14 @@ class SetupWindow(QWidget):
         is_update = self.mode == "update"
         names = ", ".join(self.missing)
 
-        title = QLabel("Нашли обновление компонентов" if is_update else "Нужно скачать пару компонентов")
+        title = QLabel(tr("setup.head_update") if is_update else tr("setup.head_missing"))
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         layout.addWidget(title)
 
         if is_update:
-            description = QLabel(
-                f"Вышла новая версия: {names}.\n"
-                "Обновляем автоматически, это недолго — программа откроется, как только всё будет готово."
-            )
+            description = QLabel(tr("setup.desc_update", names=names))
         else:
-            description = QLabel(
-                f"Отсутствуют: {names}.\n"
-                "Это разовая установка, дальше приложение будет открываться сразу.\n"
-                "Всё необходимое скачается автоматически в папку приложения:"
-            )
+            description = QLabel(tr("setup.desc_missing", names=names))
         description.setWordWrap(True)
         layout.addWidget(description)
 
@@ -177,7 +171,7 @@ class SetupWindow(QWidget):
         self.path_label.setStyleSheet("font-weight: 600;")
         layout.addWidget(self.path_label)
 
-        self.status_label = QLabel("Обновляем..." if is_update else "Готово к загрузке")
+        self.status_label = QLabel(tr("setup.status_updating") if is_update else tr("setup.status_ready"))
         self.status_label.setObjectName("secondary")
         layout.addWidget(self.status_label)
 
@@ -185,14 +179,14 @@ class SetupWindow(QWidget):
         self.progress_bar.setRange(0, 100)
         layout.addWidget(self.progress_bar)
 
-        self.start_btn = QPushButton("Начать установку")
+        self.start_btn = QPushButton(tr("setup.start"))
         self.start_btn.setObjectName("accent")
         self.start_btn.clicked.connect(self._start_download)
         layout.addWidget(self.start_btn)
         if is_update:
             self.start_btn.hide()  # обновление стартует само, кнопка не нужна
 
-        self.retry_btn = QPushButton("Повторить")
+        self.retry_btn = QPushButton(tr("setup.retry"))
         self.retry_btn.setObjectName("accent")
         self.retry_btn.clicked.connect(self._start_download)
         self.retry_btn.hide()
@@ -207,18 +201,18 @@ class SetupWindow(QWidget):
         self.done_label.hide()
         layout.addWidget(self.done_label)
 
-        self.shortcut_btn = QPushButton("Создать ярлык на рабочем столе")
+        self.shortcut_btn = QPushButton(tr("setup.shortcut"))
         self.shortcut_btn.clicked.connect(self._create_shortcut)
         self.shortcut_btn.hide()
         layout.addWidget(self.shortcut_btn)
 
-        self.continue_btn = QPushButton("Продолжить")
+        self.continue_btn = QPushButton(tr("setup.continue"))
         self.continue_btn.setObjectName("accent")
         self.continue_btn.clicked.connect(self.setup_finished.emit)
         self.continue_btn.hide()
         layout.addWidget(self.continue_btn)
 
-        self.skip_btn = QPushButton("Пропустить и открыть программу")
+        self.skip_btn = QPushButton(tr("setup.skip"))
         self.skip_btn.clicked.connect(self.setup_finished.emit)
         self.skip_btn.hide()
         layout.addWidget(self.skip_btn)
@@ -228,7 +222,7 @@ class SetupWindow(QWidget):
         self.retry_btn.hide()
         self.skip_btn.hide()
         self.progress_bar.setValue(0)
-        self.status_label.setText("Подготовка...")
+        self.status_label.setText(tr("setup.preparing"))
 
         self._worker = DependencyDownloadWorker(self.missing)
         self._worker.status.connect(self.status_label.setText)
@@ -238,20 +232,18 @@ class SetupWindow(QWidget):
 
     def _on_finished(self, ok: bool, error_message: str) -> None:
         if ok:
-            self.status_label.setText("Готово!")
+            self.status_label.setText(tr("setup.done"))
             if self.mode == "update":
                 self.setup_finished.emit()  # обновление — молча открываем программу
             else:
                 self.done_label.setText(
-                    "Файлы приложения сохранены в папку:\n"
-                    f"{config.APP_DATA_DIR}\n\n"
-                    "Здесь хранятся: " + ", ".join(config.DATA_FILE_NAMES) + "."
+                    tr("setup.saved", path=config.APP_DATA_DIR, files=", ".join(config.DATA_FILE_NAMES))
                 )
                 self.done_label.show()
                 self.shortcut_btn.show()
                 self.continue_btn.show()
         else:
-            self.status_label.setText(f"Ошибка: {error_message}")
+            self.status_label.setText(tr("setup.error", error=error_message))
             self.retry_btn.show()
             if self.mode == "update":
                 self.skip_btn.show()
@@ -260,7 +252,7 @@ class SetupWindow(QWidget):
         ok, info = create_desktop_shortcut()
         if ok:
             self.shortcut_btn.setEnabled(False)
-            self.shortcut_btn.setText("✓ Ярлык создан на рабочем столе")
-            self.status_label.setText(f"Ярлык создан: {info}")
+            self.shortcut_btn.setText(tr("setup.shortcut_done"))
+            self.status_label.setText(tr("setup.shortcut_created", path=info))
         else:
-            self.status_label.setText(f"Не удалось создать ярлык: {info}")
+            self.status_label.setText(tr("setup.shortcut_failed", error=info))

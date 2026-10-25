@@ -3,6 +3,8 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from app.i18n import tr
+
 DANGER_STYLE = """
 QPushButton {
     background-color: #d64545; color: white; border: none;
@@ -15,10 +17,10 @@ QPushButton:pressed { background-color: #b83a3a; }
 
 class ConfirmDialog(QDialog):
     def __init__(
-        self, text: str, parent=None, title: str = "Подтверждение", danger: str = "no"
+        self, text: str, parent=None, title: str | None = None, danger: str = "no"
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(title or tr("confirm.title"))
         self.setModal(True)
 
         layout = QVBoxLayout(self)
@@ -29,8 +31,8 @@ class ConfirmDialog(QDialog):
 
         row = QHBoxLayout()
         row.addStretch()
-        self.yes_btn = QPushButton("Да")
-        self.no_btn = QPushButton("Нет")
+        self.yes_btn = QPushButton(tr("common.yes"))
+        self.no_btn = QPushButton(tr("common.no"))
         # какая из кнопок красная: "no" (безопасный отказ) или "yes" (опасное действие)
         (self.yes_btn if danger == "yes" else self.no_btn).setStyleSheet(DANGER_STYLE)
         self.yes_btn.clicked.connect(self.accept)
@@ -45,7 +47,7 @@ class ConfirmDialog(QDialog):
 
 def confirm_remove_from_queue(parent=None) -> bool:
     dlg = ConfirmDialog(
-        "Вы точно хотите удалить трек из очереди?\nЭто действие необратимо.", parent, danger="yes"
+        tr("confirm.remove_track"), parent, danger="yes"
     )
     return dlg.exec() == QDialog.DialogCode.Accepted
 
@@ -53,7 +55,7 @@ def confirm_remove_from_queue(parent=None) -> bool:
 def confirm_clear_queue(parent=None) -> bool:
     """Предупреждение об удалении всей очереди — здесь красная кнопка «Да»."""
     dlg = ConfirmDialog(
-        "Вы точно хотите удалить всю очередь?\nЭто действие необратимо.", parent, danger="yes"
+        tr("confirm.clear_queue"), parent, danger="yes"
     )
     return dlg.exec() == QDialog.DialogCode.Accepted
 
@@ -61,6 +63,6 @@ def confirm_clear_queue(parent=None) -> bool:
 def confirm_clear_history(parent=None) -> bool:
     """Предупреждение перед полной очисткой истории — красная кнопка «Да»."""
     dlg = ConfirmDialog(
-        "Вы точно хотите очистить всю историю?\nЭто действие необратимо.", parent, danger="yes"
+        tr("confirm.clear_history"), parent, danger="yes"
     )
     return dlg.exec() == QDialog.DialogCode.Accepted

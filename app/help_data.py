@@ -38,19 +38,60 @@ class HelpEntry:
             [self.title, self.category, self.log_example, self.cause, *self.steps, *self.patterns]
         ).lower()
 
-    def matches_query(self, query: str) -> bool:
-        """Все слова запроса должны встретиться где-то в записи (регистр не важен)."""
+    def matches_query(self, query: str, lang: str = "ru") -> bool:
+        """Все слова запроса должны встретиться где-то в записи на выбранном языке (регистр не важен)."""
         words = query.strip().lower().split()
         if not words:
             return True
-        blob = self.search_blob
+        blob = self.localized(lang).search_blob
         return all(w in blob for w in words)
+
+    def localized(self, lang: str) -> "LocalizedEntry":
+        """Запись на нужном языке: русский — из самой записи, uk/en — из help_translations."""
+        from app.help_translations import TRANSLATIONS  # импорт здесь — чтобы не плодить циклы
+
+        tr_data = TRANSLATIONS.get(lang, {}).get(self.key, {})
+        title = tr_data.get("title", self.title)
+        log_example = tr_data.get("log_example", self.log_example)
+        cause = tr_data.get("cause", self.cause)
+        steps = tuple(tr_data.get("steps", self.steps))
+        blob = " ".join([title, log_example, cause, *steps, *self.patterns, self.title]).lower()
+        return LocalizedEntry(
+            key=self.key,
+            category_key=CATEGORY_KEYS[self.category],
+            title=title,
+            log_example=log_example,
+            cause=cause,
+            steps=steps,
+            link=self.link,
+            search_blob=blob,
+        )
+
+
+@dataclass(frozen=True)
+class LocalizedEntry:
+    key: str
+    category_key: str   # ключ локализации названия категории (help.cat_*)
+    title: str
+    log_example: str
+    cause: str
+    steps: tuple[str, ...]
+    link: str
+    search_blob: str
 
 
 CAT_YT = "YouTube и доступ"
 CAT_NET = "Сеть"
 CAT_FILES = "Файлы и ffmpeg"
 CAT_APP = "Само приложение"
+
+
+CATEGORY_KEYS = {
+    CAT_YT: "help.cat_yt",
+    CAT_NET: "help.cat_net",
+    CAT_FILES: "help.cat_files",
+    CAT_APP: "help.cat_app",
+}
 
 
 HELP_ENTRIES: tuple[HelpEntry, ...] = (
@@ -242,7 +283,8 @@ HELP_ENTRIES: tuple[HelpEntry, ...] = (
         steps=(
             "Перезапусти приложение — оно само скачает свежий yt-dlp.",
             "Если обновление только что поставилось — подожди и повтори позже: исправление ещё не вышло.",
-            "Удали `yt-dlp.exe` рядом с программой и запусти приложение — оно скачает чистую копию.",
+            "Удали `yt-dlp.exe` из папки данных приложения (`%LOCALAPPDATA%\\YouTubeMusicDownloader`) и запусти приложение — "
+            "оно скачает чистую копию.",
         ),
     ),
     # ───────────────  Сеть  ───────────────
@@ -300,12 +342,12 @@ HELP_ENTRIES: tuple[HelpEntry, ...] = (
                     "Please install or provide the path using --ffmpeg-location",
         patterns=("ffprobe and ffmpeg not found", "ffmpeg not found", "ffprobe not found",
                   "ffmpeg/avconv not found", "ffprobe/avprobe"),
-        cause="Для конвертации в mp3 нужны `ffmpeg.exe` и `ffprobe.exe` рядом с программой. "
+        cause="Для конвертации в mp3 нужны `ffmpeg.exe` и `ffprobe.exe` в папке данных приложения (`%LOCALAPPDATA%\\YouTubeMusicDownloader`). "
               "Файлы удалены, не докачались или заблокированы антивирусом.",
         steps=(
-            "Проверь, что `ffmpeg.exe` лежит в одной папке с программой.",
+            "Проверь, что `ffmpeg.exe` лежит в папке данных приложения.",
             "Удали `ffmpeg.exe` и перезапусти приложение — окно установки скачает его заново.",
-            "Добавь папку приложения в исключения антивируса, чтобы он снова не удалил файлы.",
+            "Добавь папку данных приложения в исключения антивируса, чтобы он снова не удалил файлы.",
         ),
     ),
     HelpEntry(
@@ -369,11 +411,11 @@ HELP_ENTRIES: tuple[HelpEntry, ...] = (
         title="yt-dlp.exe не найден",
         log_example="FileNotFoundError: [WinError 2] The system cannot find the file specified",
         patterns=("[winerror 2]", "cannot find the file specified"),
-        cause="Рядом с программой нет `yt-dlp.exe` (или `ffmpeg.exe`): файл удалён, переименован "
+        cause="В папке данных приложения нет `yt-dlp.exe` (или `ffmpeg.exe`): файл удалён, переименован "
               "или убран антивирусом.",
         steps=(
             "Перезапусти приложение — окно «Первый запуск» скачает недостающее.",
-            "Если файл исчезает снова — добавь папку программы в исключения антивируса.",
+            "Если файл исчезает снова — добавь папку данных приложения в исключения антивируса.",
         ),
     ),
     HelpEntry(
@@ -449,7 +491,7 @@ HELP_ENTRIES: tuple[HelpEntry, ...] = (
             "Нажми «Повторить» или «Пропустить» — старые версии продолжат работать.",
             "Проверь интернет и доступ к `github.com`.",
             "Закрой другие копии приложения и процессы `yt-dlp.exe` / `ffmpeg.exe`.",
-            "Если не выходит — скачай `yt-dlp.exe` и `ffmpeg.exe` вручную и положи в папку приложения.",
+            "Если не выходит — скачай `yt-dlp.exe` и `ffmpeg.exe` вручную и положи в папку данных приложения.",
         ),
     ),
 )

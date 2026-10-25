@@ -5,6 +5,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from app import config
+from app.i18n import tr
 
 APP_NAME = "YouTube Music Downloader"
 APP_VERSION = "2.0"
@@ -23,11 +24,11 @@ def credits(link_color: str) -> tuple:
     """(подпись, HTML текста, эмодзи). Эмодзи — в отдельной метке со своим шрифтом
     и запасом по высоте, чтобы крупный значок не обрезался; цвет ссылки задан в теге."""
     return (
-        ("Автор", "aleljx", "🔴👓"),
-        ("Сделано вместе с", "Claude", "🟠"),
+        (tr("about.author"), "aleljx", "🔴👓"),
+        (tr("about.co_author"), "Claude", "🟠"),
         (
-            "Автор иконки",
-            f'<a href="{ICON_AUTHOR_URL}" style="color: {link_color};">Подсолнух В Очках</a>',
+            tr("about.icon_author"),
+            f'<a href="{ICON_AUTHOR_URL}" style="color: {link_color};">{tr("about.icon_author_name")}</a>',
             "🌻🕶",
         ),
     )
@@ -37,7 +38,7 @@ def _emoji_label(text: str) -> QLabel:
     label = QLabel(text)
     families = ", ".join(f'"{f}"' for f in EMOJI_FAMILIES)
     # размер и шрифт — через QSS: общий стиль приложения (font-size: 13px) иначе перебивает setFont
-    label.setStyleSheet(f"font-family: {families}; font-size: 17px; padding: 2px 0px;")
+    label.setStyleSheet(f"font-family: {families}; font-size: 22px; padding: 2px 0px;")
     label.setMinimumHeight(38)
     label.setMinimumWidth(30 * len(text.replace("\ufe0f", "")) // 1)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -47,7 +48,7 @@ def _emoji_label(text: str) -> QLabel:
 class AboutWindow(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("О программе")
+        self.setWindowTitle(tr("about.title"))
         self.setModal(True)
         self.setFixedWidth(360)
 
@@ -67,7 +68,7 @@ class AboutWindow(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        version = QLabel(f"Версия {APP_VERSION}")
+        version = QLabel(tr("about.version", version=APP_VERSION))
         version.setObjectName("secondary")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version)
@@ -95,7 +96,7 @@ class AboutWindow(QDialog):
 
         row = QHBoxLayout()
         row.addStretch()
-        close_btn = QPushButton("Закрыть")
+        close_btn = QPushButton(tr("common.close"))
         close_btn.setObjectName("accent")
         close_btn.clicked.connect(self.accept)
         row.addWidget(close_btn)
