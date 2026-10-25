@@ -18,8 +18,9 @@ import ctypes
 import os
 import sys
 
+from PyQt6.QtCore import QFileInfo
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileIconProvider
 
 from app import config
 from app.main_window import MainWindow
@@ -46,6 +47,10 @@ def setup_app_icon(app: QApplication) -> None:
             pass
     if os.path.exists(config.ICON_PATH):
         app.setWindowIcon(QIcon(config.ICON_PATH))
+    elif getattr(sys, "frozen", False):
+        # Запасной вариант для собранной программы: берём иконку, вшитую в сам .exe
+        # (она попадает туда из параметра --icon при сборке)
+        app.setWindowIcon(QFileIconProvider().icon(QFileInfo(sys.executable)))
 
 
 def main() -> None:

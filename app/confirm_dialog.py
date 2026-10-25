@@ -1,4 +1,4 @@
-"""Небольшое окно подтверждения с кнопками «Да» / «Нет»."""
+"""Небольшое окно подтверждения с кнопками «Да» / «Нет» («Нет» — красная)."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
@@ -31,6 +31,7 @@ class ConfirmDialog(QDialog):
         row.addStretch()
         self.yes_btn = QPushButton("Да")
         self.no_btn = QPushButton("Нет")
+        # какая из кнопок красная: "no" (безопасный отказ) или "yes" (опасное действие)
         (self.yes_btn if danger == "yes" else self.no_btn).setStyleSheet(DANGER_STYLE)
         self.yes_btn.clicked.connect(self.accept)
         self.no_btn.clicked.connect(self.reject)
@@ -53,5 +54,13 @@ def confirm_clear_queue(parent=None) -> bool:
     """Предупреждение об удалении всей очереди — здесь красная кнопка «Да»."""
     dlg = ConfirmDialog(
         "Вы точно хотите удалить всю очередь?\nЭто действие необратимо.", parent, danger="yes"
+    )
+    return dlg.exec() == QDialog.DialogCode.Accepted
+
+
+def confirm_clear_history(parent=None) -> bool:
+    """Предупреждение перед полной очисткой истории — красная кнопка «Да»."""
+    dlg = ConfirmDialog(
+        "Вы точно хотите очистить всю историю?\nЭто действие необратимо.", parent, danger="yes"
     )
     return dlg.exec() == QDialog.DialogCode.Accepted

@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 from app import config, theme
 from app.about_window import AboutWindow
 from app.background import BlobBackground
-from app.confirm_dialog import confirm_clear_queue, confirm_remove_from_queue
+from app.confirm_dialog import confirm_clear_history, confirm_clear_queue, confirm_remove_from_queue
 from app.help_window import HelpWindow
 from app.downloader import (
     DownloadWorker, MetadataWorker, PreviewStreamWorker, SearchWorker,
@@ -368,6 +368,7 @@ class MainWindow(QMainWindow):
         self.queue_list.remove_requested.connect(self._on_remove_clicked)
         self.queue_list.setMouseTracking(True)
         self.queue_list.itemEntered.connect(self._on_list_item_hovered)
+        self.queue_list.itemClicked.connect(self._on_search_result_selected)
         self.queue_list.mouse_left.connect(self._restore_preview)
         self.queue_list.setStyleSheet("QListWidget::item { padding-right: 32px; }")
         self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # место под «✕»
@@ -390,6 +391,7 @@ class MainWindow(QMainWindow):
         self.history_list = HoverListWidget()
         self.history_list.setMouseTracking(True)
         self.history_list.itemEntered.connect(self._on_list_item_hovered)
+        self.history_list.itemClicked.connect(self._on_search_result_selected)
         self.history_list.mouse_left.connect(self._restore_preview)
         history_layout.addWidget(self.history_list)
         history_buttons = QHBoxLayout()
@@ -755,31 +757,39 @@ class MainWindow(QMainWindow):
 
     def _on_search_result_selected(self, item: QListWidgetItem) -> None:
         """
-        Одинарный клик по треку в поиске — делает его "активным" (тем самым,
-        что уйдёт в скачивание), и снимает неоднозначность с полем ссылки:
-        раз выбор сделан в поиске, поле ссылки больше не должно указывать
-        на другой трек, поэтому очищаем его.
+        Одинарный клик по треку (в поиске, очереди или истории) — делает его "активным"
+        (тем, что уйдёт в скачивание/предпрослушивание) и закрепляет превью: когда мышь
+        уходит со списка, превью возвращается именно к нему, а не пропадает — так можно
+        спокойно перевести курсор на «Предпрослушать».
+        Раз выбор сделан в списке, поле ссылки больше не должно указывать на другой трек,
+        поэтому очищаем его, а выделение в остальных списках снимаем.
         """
         data = item.data(Qt.ItemDataRole.UserRole)
         if not data:
             return
-        self._active_url = data["url"]
+        url = data["url"] if isinstance(data, dict) else data
+        title = data["title"] if isinstance(data, dict) else item.text()
+        self._active_url = url
         self.url_input.blockSignals(True)
         self.url_input.clear()
         self.url_input.blockSignals(False)
 
-        cached = self._metadata_cache.get(data["url"])
+        for lst in (self.search_results_list, self.queue_list, self.history_list):
+            if lst is not item.listWidget():
+                lst.clearSelection()
+
+        cached = self._metadata_cache.get(url)
         if cached:
             self._on_metadata_ready(cached)
-            self._set_status(f"Выбран трек: {data['title']}")
+            self._set_status(f"Выбран трек: {title}")
         else:
             self._set_status("Загружаем обложку и данные выбранного трека...")
 
             def _on_done(meta: dict) -> None:
                 self._on_metadata_ready(meta)
-                self._set_status(f"Выбран трек: {data['title']}")
+                self._set_status(f"Выбран трек: {title}")
 
-            self._fetch_metadata(data["url"], _on_done)
+            self._fetch_metadata(url, _on_done)
 
     def _on_list_item_hovered(self, item: QListWidgetItem) -> None:
         """
@@ -809,6 +819,11 @@ class MainWindow(QMainWindow):
             self.history_list.addItem(item)
 
     def _clear_history(self) -> None:
+        if not self.history.items:
+            self._set_status("История уже пуста")
+            return
+        if not confirm_clear_history(self):
+            return
         self.history.clear()
         self._refresh_history_list()
 

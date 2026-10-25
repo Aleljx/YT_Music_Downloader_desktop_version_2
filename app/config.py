@@ -48,7 +48,8 @@ def _find_icon() -> str:
     """Иконка — часть самой программы. Ищем icon.ico в корне проекта и в типичных
     подпапках; если не нашли, возвращаем путь в корне (файла может не быть)."""
     here = os.path.dirname(os.path.abspath(__file__))  # папка app/
-    for folder in (BASE_DIR, here, *(os.path.join(BASE_DIR, d) for d in ("assets", "resources", "icons", "img", "images"))):
+    bundled = getattr(sys, "_MEIPASS", None)  # папка _internal у программы, собранной PyInstaller
+    for folder in (*((bundled,) if bundled else ()), BASE_DIR, os.path.join(BASE_DIR, "_internal"), here, *(os.path.join(BASE_DIR, d) for d in ("assets", "resources", "icons", "img", "images"))):
         path = os.path.join(folder, "icon.ico")
         if os.path.exists(path):
             return path
