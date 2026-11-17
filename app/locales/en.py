@@ -22,6 +22,7 @@ STRINGS = {
     "ui.add_queue": "＋ Add to queue",
     "ui.theme_color": "Theme color",
     "ui.beautiful": "✨ Beautiful theme",
+    "ui.material": "🎨 Material You",
     "ui.search_placeholder": "Search music...",
     "tab.search": "Search",
     "tab.queue": "Queue",

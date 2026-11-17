@@ -286,10 +286,12 @@ class MainWindow(QMainWindow):
         self.url_input.setPlaceholderText("https://www.youtube.com/watch?v=...")
         self.url_input.editingFinished.connect(self._on_url_input_changed)
         paste_btn = QPushButton("📋")
-        paste_btn.setFixedWidth(36)
+        paste_btn.setFixedWidth(40)
+        paste_btn.setObjectName("iconBtn")
         paste_btn.clicked.connect(self._paste_url)
         clear_btn = QPushButton("✕")
-        clear_btn.setFixedWidth(36)
+        clear_btn.setFixedWidth(40)
+        clear_btn.setObjectName("iconBtn")
         clear_btn.clicked.connect(self._clear_url_input)
         url_row.addWidget(self.url_input)
         url_row.addWidget(paste_btn)
@@ -331,8 +333,9 @@ class MainWindow(QMainWindow):
         for color in theme.ACCENT_PRESETS:
             swatch = QPushButton()
             swatch.setFixedSize(22, 22)
+            swatch.setObjectName("swatch")
             swatch.setStyleSheet(
-                f"background-color: {color}; border-radius: 11px; border: none;"
+                f"QPushButton {{ background-color: {color}; border-radius: 11px; border: 1px solid transparent; padding: 0px; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; }}"
             )
             swatch.clicked.connect(lambda _checked, c=color: self._set_accent_color(c))
             colors_row.addWidget(swatch)
@@ -342,8 +345,14 @@ class MainWindow(QMainWindow):
         self.beautiful_btn = QPushButton(tr("ui.beautiful"))
         self.beautiful_btn.setCheckable(True)
         self.beautiful_btn.setChecked(self.settings.appearance_mode == theme.BEAUTIFUL_MODE)
-        self.beautiful_btn.clicked.connect(self._toggle_beautiful_theme)
+        self.beautiful_btn.clicked.connect(lambda: self._toggle_theme_mode(theme.BEAUTIFUL_MODE))
         layout.addWidget(self.beautiful_btn)
+
+        self.material_btn = QPushButton(tr("ui.material"))
+        self.material_btn.setCheckable(True)
+        self.material_btn.setChecked(self.settings.appearance_mode == theme.MATERIAL_MODE)
+        self.material_btn.clicked.connect(lambda: self._toggle_theme_mode(theme.MATERIAL_MODE))
+        layout.addWidget(self.material_btn)
 
         layout.addStretch()
         return panel
@@ -363,7 +372,8 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText(tr("ui.search_placeholder"))
         self.search_input.returnPressed.connect(self._run_search)
         search_btn = QPushButton("🔍")
-        search_btn.setFixedWidth(36)
+        search_btn.setFixedWidth(40)
+        search_btn.setObjectName("iconBtn")
         search_btn.clicked.connect(self._run_search)
         search_row.addWidget(self.search_input)
         search_row.addWidget(search_btn)
@@ -503,6 +513,7 @@ class MainWindow(QMainWindow):
         self.add_queue_btn.setText(tr("ui.add_queue"))
         self.theme_label.setText(tr("ui.theme_color"))
         self.beautiful_btn.setText(tr("ui.beautiful"))
+        self.material_btn.setText(tr("ui.material"))
         self.search_input.setPlaceholderText(tr("ui.search_placeholder"))
         self.tabs.setTabText(0, tr("tab.search"))
         self.tabs.setTabText(1, tr("tab.queue"))
@@ -525,17 +536,22 @@ class MainWindow(QMainWindow):
     #  Тема
     # ─────────────────────────────────────────────
     def _apply_theme(self) -> None:
-        beautiful = self.settings.appearance_mode == theme.BEAUTIFUL_MODE
-        theme.apply_theme(QApplication.instance(), self.settings.accent_color, self.settings.appearance_mode)
+        mode = self.settings.appearance_mode
+        beautiful = mode == theme.BEAUTIFUL_MODE
+        theme.apply_theme(QApplication.instance(), self.settings.accent_color, mode)
         self.background.configure(beautiful, self.settings.accent_color)
         self.beautiful_btn.setChecked(beautiful)
+        self.material_btn.setChecked(mode == theme.MATERIAL_MODE)
 
-    def _toggle_beautiful_theme(self) -> None:
-        if self.settings.appearance_mode == theme.BEAUTIFUL_MODE:
+    def _toggle_theme_mode(self, mode: str) -> None:
+        """Включает особую тему (Красивая / Material You); повторное нажатие возвращает прежнюю."""
+        special = (theme.BEAUTIFUL_MODE, theme.MATERIAL_MODE)
+        if self.settings.appearance_mode == mode:
             self.settings.appearance_mode = self._previous_appearance
         else:
-            self._previous_appearance = self.settings.appearance_mode
-            self.settings.appearance_mode = theme.BEAUTIFUL_MODE
+            if self.settings.appearance_mode not in special:
+                self._previous_appearance = self.settings.appearance_mode
+            self.settings.appearance_mode = mode
         self.settings.save()
         self._apply_theme()
 

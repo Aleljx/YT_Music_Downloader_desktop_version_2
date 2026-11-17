@@ -10,6 +10,8 @@
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
+from app.material_you import MATERIAL_MODE, build_stylesheet as build_material_stylesheet
+
 
 # Пресеты акцентного цвета — те же, что в старом customtkinter-варианте
 ACCENT_PRESETS: list[str] = [
@@ -289,6 +291,10 @@ def _beautiful_extras(p: dict, accent_color: str) -> str:
 
 def apply_theme(app: QApplication, accent_color: str, appearance_mode: str) -> None:
     """Удобный вход из main.py/main_window.py: считает тему и применяет её ко всему приложению."""
+    if appearance_mode == MATERIAL_MODE:
+        # «Material You»: цвета строит библиотека из акцентного цвета; светлая/тёмная — по теме Windows
+        app.setStyleSheet(build_material_stylesheet(accent_color, resolve_dark_mode("System")))
+        return
     beautiful = appearance_mode == BEAUTIFUL_MODE
     dark = beautiful or resolve_dark_mode(appearance_mode)
     app.setStyleSheet(build_stylesheet(accent_color, dark, beautiful))

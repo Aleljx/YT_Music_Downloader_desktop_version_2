@@ -22,6 +22,7 @@ STRINGS = {
     "ui.add_queue": "＋ У чергу",
     "ui.theme_color": "Колір теми",
     "ui.beautiful": "✨ Гарна тема",
+    "ui.material": "🎨 Material You",
     "ui.search_placeholder": "Пошук музики...",
     "tab.search": "Пошук",
     "tab.queue": "Черга",
